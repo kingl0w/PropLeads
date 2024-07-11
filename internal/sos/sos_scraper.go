@@ -34,7 +34,6 @@ func LookupBusiness(companyName string) (BusinessInfo, error) {
     ctx, cancel := chromedp.NewContext(allocCtx, chromedp.WithLogf(log.Printf))
     defer cancel()
 
-    // Set a timeout for the entire operation
     ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
     defer cancel()
 
@@ -50,48 +49,15 @@ func LookupBusiness(companyName string) (BusinessInfo, error) {
             log.Printf("Clicked search button for %s", companyName)
             return nil
         }),
+        chromedp.Sleep(2*time.Second), // Add a short pause to allow the page to render
         chromedp.ActionFunc(func(ctx context.Context) error {
-            return waitForResultsOrNoResults(ctx)
+            return waitForResultsOrNoResults(ctx, companyName, &info)
         }),
-        chromedp.ActionFunc(func(ctx context.Context) error {
-            var noResults int
-            if err := chromedp.Evaluate(`document.querySelector('#results-div').textContent.includes('No records found') ? 1 : 0`, &noResults).Do(ctx); err != nil {
-                return err
-            }
-            if noResults == 1 {
-                log.Printf("No results found for %s", companyName)
-                return nil
-            }
-            if err := chromedp.Click(`#results-div table tbody tr:first-child td:first-child b a`, chromedp.ByQuery).Do(ctx); err != nil {
-                return err
-            }
-            return waitForElement(ctx, `#filings-article > section > section:nth-child(6)`)
-        }),
-        chromedp.Evaluate(`
-            (() => {
-                const officials = [];
-                const section = document.querySelector('#filings-article > section > section:nth-child(6)');
-                if (section) {
-                    const paragraphs = section.getElementsByTagName('p');
-                    for (let p of paragraphs) {
-                        const titleSpan = p.querySelector('span.greenLabel');
-                        const nameLink = p.querySelector('span:nth-child(3) > a');
-                        if (titleSpan && nameLink) {
-                            officials.push({
-                                title: titleSpan.textContent.trim(),
-                                name: nameLink.textContent.trim()
-                            });
-                        }
-                    }
-                }
-                return officials;
-            })()
-        `, &info.CompanyOfficials),
     )
 
     if err != nil {
         if err == context.DeadlineExceeded {
-            log.Printf("Timeout occurred while processing %s", companyName)
+            log.Printf("Process took too long for %s", companyName)
             info.CompanyOfficials = append(info.CompanyOfficials, Official{Title: "Result", Name: "Timeout"})
             return info, nil
         }
@@ -99,17 +65,89 @@ func LookupBusiness(companyName string) (BusinessInfo, error) {
         return BusinessInfo{}, fmt.Errorf("error scraping business info: %v", err)
     }
 
-    if len(info.CompanyOfficials) == 0 {
-        info.CompanyOfficials = append(info.CompanyOfficials, Official{Title: "Result", Name: "No match"})
-    }
-
     return info, nil
 }
 
-func waitForResultsOrNoResults(ctx context.Context) error {
-    return chromedp.WaitVisible(`#results-div`, chromedp.ByID).Do(ctx)
+func waitForResultsOrNoResults(ctx context.Context, companyName string, info *BusinessInfo) error {
+    var recordsFound string
+    err := chromedp.Text(`#results-article > div > span:nth-child(1)`, &recordsFound).Do(ctx)
+    if err != nil {
+        return err
+    }
+
+    if recordsFound == "Records Found: 0" {
+        log.Printf("No results found for %s", companyName)
+        info.CompanyOfficials = append(info.CompanyOfficials, Official{Title: "Result", Name: "No match"})
+        return nil
+    }
+
+    // Check for Annual Report button in top 3 results
+    var annualReportIndex int
+    err = chromedp.Evaluate(`
+        (() => {
+            const rows = document.querySelectorAll('#results-div > table > tbody > tr');
+            for (let i = 0; i < Math.min(rows.length, 3); i++) {
+                if (rows[i].querySelector('a.button[href*="annual_report"]')) {
+                    return i + 1;
+                }
+            }
+            return 0;
+        })()
+    `, &annualReportIndex).Do(ctx)
+    if err != nil {
+        return err
+    }
+
+    // Click on the appropriate result
+    var clickSelector string
+    if annualReportIndex > 0 {
+        clickSelector = fmt.Sprintf(`#results-div > table > tbody > tr:nth-child(%d) td:first-child b a`, annualReportIndex)
+    } else {
+        clickSelector = `#results-div > table > tbody > tr:first-child td:first-child b a`
+    }
+
+    err = chromedp.Click(clickSelector, chromedp.ByQuery).Do(ctx)
+    if err != nil {
+        return err
+    }
+
+    err = chromedp.WaitVisible(`#filings-article`, chromedp.ByID).Do(ctx)
+    if err != nil {
+        return err
+    }
+
+    return extractOfficials(ctx, info)
 }
 
-func waitForElement(ctx context.Context, selector string) error {
-    return chromedp.WaitVisible(selector, chromedp.ByQuery).Do(ctx)
+func extractOfficials(ctx context.Context, info *BusinessInfo) error {
+    err := chromedp.Evaluate(`
+        (() => {
+            const officials = [];
+            const section = document.querySelector('#filings-article > section > section:nth-child(6)');
+            if (section) {
+                const paragraphs = section.getElementsByTagName('p');
+                for (let p of paragraphs) {
+                    const titleSpan = p.querySelector('span.greenLabel');
+                    const nameLink = p.querySelector('span:nth-child(3) > a');
+                    if (titleSpan && nameLink) {
+                        officials.push({
+                            title: titleSpan.textContent.trim(),
+                            name: nameLink.textContent.trim()
+                        });
+                    }
+                }
+            }
+            return officials;
+        })()
+    `, &info.CompanyOfficials).Do(ctx)
+
+    if err != nil {
+        return err
+    }
+
+    if len(info.CompanyOfficials) == 0 {
+        info.CompanyOfficials = append(info.CompanyOfficials, Official{Title: "Result", Name: "No officials found"})
+    }
+
+    return nil
 }
