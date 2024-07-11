@@ -87,31 +87,39 @@ func runSOSScrape() {
         log.Fatalf("Failed to read parcel results: %v", err)
     }
 
-    var businessInfos []sos.BusinessInfo
-
+    // Extract unique business names
+    uniqueBusinesses := make(map[string]bool)
     for _, parcel := range parcels {
         ownerName := parcel["Owner"]
         if csv.IsBusinessName(ownerName) {
-            fmt.Printf("Looking up business: %s\n", ownerName)
-            info, err := sos.LookupBusiness(ownerName)
-            if err != nil {
-                fmt.Printf("Error looking up business %s: %v\n", ownerName, err)
-                continue
-            }
-            if len(info.CompanyOfficials) == 0 {
-                fmt.Printf("No officials found for business %s\n", ownerName)
-            } else {
-                fmt.Printf("Found %d officials for %s\n", len(info.CompanyOfficials), ownerName)
-            }
-            businessInfos = append(businessInfos, info)
+            uniqueBusinesses[ownerName] = true
         }
     }
 
-    // Write SOS results
+    var businessInfos []sos.BusinessInfo
+    for businessName := range uniqueBusinesses {
+        fmt.Printf("Looking up business: %s\n", businessName)
+        
+        info, err := sos.LookupBusiness(businessName)
+        if err != nil {
+            log.Printf("Error looking up business %s: %v\n", businessName, err)
+            continue
+        }
+        
+        if len(info.CompanyOfficials) == 0 {
+            log.Printf("No officials found for business %s\n", businessName)
+        } else {
+            log.Printf("Found %d officials for %s\n", len(info.CompanyOfficials), businessName)
+            for i, official := range info.CompanyOfficials {
+                log.Printf("  Official %d: %s - %s", i+1, official.Title, official.Name)
+            }
+        }
+        businessInfos = append(businessInfos, info)
+    }
+
     err = csv.WriteSOSResults(sosResultsFile, businessInfos)
     if err != nil {
         log.Fatalf("Failed to write SOS results: %v", err)
     }
-
     fmt.Printf("SOS results written to %s\n", sosResultsFile)
 }

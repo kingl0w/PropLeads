@@ -69,12 +69,26 @@ func WriteSOSResults(filename string, businesses []sos.BusinessInfo) error {
     }
 
     for _, business := range businesses {
-        row := []string{
-            business.BusinessName,
-            strings.Join(business.CompanyOfficials, "; "),
-        }
-        if err := writer.Write(row); err != nil {
-            return err
+        if len(business.CompanyOfficials) == 1 && business.CompanyOfficials[0].Name == "No match" {
+            row := []string{
+                business.BusinessName,
+                "No match",
+            }
+            if err := writer.Write(row); err != nil {
+                return err
+            }
+        } else {
+            for _, official := range business.CompanyOfficials {
+                officialInfo := strings.TrimSpace(official.Title + ": " + official.Name)
+                officialInfo = strings.Join(strings.Fields(officialInfo), " ") // Remove extra spaces
+                row := []string{
+                    business.BusinessName,
+                    officialInfo,
+                }
+                if err := writer.Write(row); err != nil {
+                    return err
+                }
+            }
         }
     }
 
