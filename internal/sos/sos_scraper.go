@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/chromedp/chromedp"
@@ -34,7 +35,7 @@ func LookupBusiness(companyName string) (BusinessInfo, error) {
     ctx, cancel := chromedp.NewContext(allocCtx, chromedp.WithLogf(log.Printf))
     defer cancel()
 
-    ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
+    ctx, cancel = context.WithTimeout(ctx, 20*time.Second)
     defer cancel()
 
     var info BusinessInfo
@@ -150,4 +151,34 @@ func extractOfficials(ctx context.Context, info *BusinessInfo) error {
     }
 
     return nil
+}
+
+func RetryTimedOutBusinesses(timedOutBusinesses []string) []BusinessInfo {
+    var results []BusinessInfo
+    sem := make(chan struct{}, 5) //Limit concurrency to 5 goroutines
+
+    var mu sync.Mutex
+    var wg sync.WaitGroup
+
+    for _, companyName := range timedOutBusinesses {
+        wg.Add(1)
+        go func(name string) {
+            defer wg.Done()
+            sem <- struct{}{} //Acquire semaphore
+            defer func() { <-sem }() //Release semaphore
+
+            info, err := LookupBusiness(name)
+            if err == nil && len(info.CompanyOfficials) > 0 && info.CompanyOfficials[0].Name != "Timeout" {
+                mu.Lock()
+                results = append(results, info)
+                mu.Unlock()
+                log.Printf("Retry successful for %s", name)
+            } else {
+                log.Printf("Retry failed for %s: %v", name, err)
+            }
+        }(companyName)
+    }
+
+    wg.Wait()
+    return results
 }

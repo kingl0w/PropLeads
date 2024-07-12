@@ -97,15 +97,22 @@ func runSOSScrape() {
     }
 
     var businessInfos []sos.BusinessInfo
+    var timedOutBusinesses []string
+
     for businessName := range uniqueBusinesses {
         fmt.Printf("Looking up business: %s\n", businessName)
-        
         info, err := sos.LookupBusiness(businessName)
         if err != nil {
             log.Printf("Error looking up business %s: %v\n", businessName, err)
             continue
         }
-        
+
+        if len(info.CompanyOfficials) > 0 && info.CompanyOfficials[0].Name == "Timeout" {
+            timedOutBusinesses = append(timedOutBusinesses, businessName)
+        }
+
+        businessInfos = append(businessInfos, info)
+
         if len(info.CompanyOfficials) == 0 {
             log.Printf("No officials found for business %s\n", businessName)
         } else {
@@ -114,7 +121,23 @@ func runSOSScrape() {
                 log.Printf("  Official %d: %s - %s", i+1, official.Title, official.Name)
             }
         }
-        businessInfos = append(businessInfos, info)
+    }
+
+    // Retry timed out businesses
+    if len(timedOutBusinesses) > 0 {
+        log.Printf("Retrying %d timed out businesses", len(timedOutBusinesses))
+        retryResults := sos.RetryTimedOutBusinesses(timedOutBusinesses)
+
+        // Replace timed out results with successful retries
+        for _, retryInfo := range retryResults {
+            for i, info := range businessInfos {
+                if info.BusinessName == retryInfo.BusinessName {
+                    businessInfos[i] = retryInfo
+                    log.Printf("Retry successful for %s", retryInfo.BusinessName)
+                    break
+                }
+            }
+        }
     }
 
     err = csv.WriteSOSResults(sosResultsFile, businessInfos)
