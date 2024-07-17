@@ -12,6 +12,7 @@ import (
 	"github.com/kingl0w/PropLeads/internal/county"
 	csv "github.com/kingl0w/PropLeads/internal/csvutil"
 	"github.com/kingl0w/PropLeads/internal/dataprocessing"
+	"github.com/kingl0w/PropLeads/internal/reconciliation"
 	"github.com/kingl0w/PropLeads/internal/sos"
 )
 
@@ -21,12 +22,12 @@ func main() {
     countyName := flag.String("county", "", "Name of the county to scrape")
     sosOnly := flag.Bool("sos-only", false, "Run only the SOS scrape")
     processOnly := flag.Bool("process-only", false, "Run only the data processing step")
-    integrateOnly := flag.Bool("integrate-only", false, "Run only the data integration step")
+    reconcileOnly := flag.Bool("reconcile-only", false, "Run only the data reconciliation step")
 
     flag.Parse()
 
-    if *integrateOnly {
-        // runDataIntegration()
+    if *reconcileOnly {
+        runReconciliation()
     } else if *processOnly {
         runDataProcessing()
     } else if *sosOnly {
@@ -36,14 +37,29 @@ func main() {
     }
 }
 
-// func runDataIntegration() {
-//     err := dataintegration.PerformDataIntegration()
-//     if err != nil {
-//         log.Fatalf("Data integration failed: %v", err)
-//     }
+func runReconciliation() {
+    unifiedResultsPath := filepath.Join("data", "output", "unified_results.csv")
+    wpSearchPattern := filepath.Join("data", "input", "WP_*.csv")
+    outputPath := filepath.Join("data", "output", "final_results.csv")
 
-//     fmt.Println("Integration complete. Final results file created: data/output/final_results.csv")
-// }
+    wpFiles, err := filepath.Glob(wpSearchPattern)
+    if err != nil {
+        log.Fatalf("Error finding WP search results: %v", err)
+    }
+    if len(wpFiles) == 0 {
+        log.Fatalf("No WP search results file found matching pattern: %s", wpSearchPattern)
+    }
+    wpSearchPath := wpFiles[0] // Use the first matching file
+
+    err = reconciliation.ReconcileData(unifiedResultsPath, wpSearchPath, outputPath)
+    if err != nil {
+        log.Fatalf("Data reconciliation failed: %v", err)
+    }
+
+    fmt.Println("Reconciliation complete. Final results file created:", outputPath)
+}
+
+
 
 func runDataProcessing() {
     parcelResultsFile := filepath.Join("data", "output", "parcel_results.csv")
