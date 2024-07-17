@@ -12,21 +12,26 @@ import (
 )
 
 type UnifiedRecord struct {
-	ID              string
-	Name            string
-	BusinessName    string
-	PropertyAddress string
-	OwnerAddress    string
-	City            string
-	State           string
-	Officials       []string
+    ID              string
+    Name            string
+    BusinessName    string
+    PropertyAddress string
+    City            string
+    State           string
+    Acres           string
+    CalculatedAcres string
+    Zone            string
+    TaxCodes        string
+    SalePrice       string
+    OwnerAddress    string
+    Officials       []string
 }
 
 func ProcessData(parcelFile, sosFile, unifiedOutputFile, namesOutputFile string) error {
 	parcelRecords, err := readParcelResults(parcelFile)
-	if err != nil {
-		return fmt.Errorf("error reading parcel file: %v", err)
-	}
+    if err != nil {
+        return fmt.Errorf("error reading parcel file: %v", err)
+    }
 
 	sosRecords, err := readSOSResults(sosFile)
 	if err != nil {
@@ -36,9 +41,9 @@ func ProcessData(parcelFile, sosFile, unifiedOutputFile, namesOutputFile string)
 	mergedRecords := mergeRecords(parcelRecords, sosRecords)
 
 	err = writeUnifiedOutput(unifiedOutputFile, mergedRecords)
-	if err != nil {
-		return fmt.Errorf("error writing unified output: %v", err)
-	}
+    if err != nil {
+        return fmt.Errorf("error writing unified output: %v", err)
+    }
 
 	err = writeNamesFile(namesOutputFile, mergedRecords)
 	if err != nil {
@@ -49,24 +54,42 @@ func ProcessData(parcelFile, sosFile, unifiedOutputFile, namesOutputFile string)
 }
 
 func readParcelResults(filename string) ([]UnifiedRecord, error) {
-	data, err := readCSV(filename)
-	if err != nil {
-		return nil, err
-	}
+    file, err := os.Open(filename)
+    if err != nil {
+        return nil, err
+    }
+    defer file.Close()
 
-	var records []UnifiedRecord
-	for _, row := range data[1:] { // Skip header
-		if len(row) >= 7 {
-			record := UnifiedRecord{
-				ID:              row[0],
-				Name:            row[2],
-				PropertyAddress: row[3],
-				OwnerAddress:    row[4],
-			}
-			records = append(records, record)
-		}
-	}
-	return records, nil
+    reader := csv.NewReader(file)
+    records, err := reader.ReadAll()
+    if err != nil {
+        return nil, err
+    }
+
+    var results []UnifiedRecord
+    for _, row := range records[1:] { // Skip header
+        if len(row) < 10 {
+            continue // Skip rows with insufficient data
+        }
+        city, state := extractCityState(row[4]) // Extract city and state from owner address
+        record := UnifiedRecord{
+            ID:              row[0],
+            Name:            row[2],
+            BusinessName:    "", // This will be filled later if it's a business
+            PropertyAddress: row[3],
+            City:            city,
+            State:           state,
+            Acres:           row[5],
+            CalculatedAcres: row[6],
+            Zone:            row[7],
+            TaxCodes:        row[8],
+            SalePrice:       row[9],
+            OwnerAddress:    row[4],
+            Officials:       []string{}, // This will be filled later if applicable
+        }
+        results = append(results, record)
+    }
+    return results, nil
 }
 
 func readSOSResults(filename string) (map[string][]string, error) {
@@ -105,40 +128,61 @@ func mergeRecords(parcelRecords []UnifiedRecord, sosRecords map[string][]string)
 }
 
 func writeUnifiedOutput(filename string, records []UnifiedRecord) error {
-	file, err := os.Create(filename)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
+    file, err := os.Create(filename)
+    if err != nil {
+        return err
+    }
+    defer file.Close()
 
-	writer := csv.NewWriter(file)
-	defer writer.Flush()
+    writer := csv.NewWriter(file)
+    defer writer.Flush()
 
-	header := []string{"ID", "Name", "Business Name", "Property Address", "Owner Address", "City", "State", "Official Title", "Official Name"}
-	if err := writer.Write(header); err != nil {
-		return err
-	}
+    // Update header to match the new order
+    header := []string{
+        "ID", "Name", "Business Name", "Property Address", "City", "State",
+        "Acres", "Calculated Acres", "Zone", "Tax Codes", "Sale Price",
+        "Owner Address", "Official Title", "Official Name",
+    }
+    if err := writer.Write(header); err != nil {
+        return err
+    }
 
-	for _, record := range records {
-		city, state := extractCityState(record.OwnerAddress)
-		title, name := extractNameAndTitle(record.Officials[0])
-		row := []string{
-			record.ID,
-			record.Name,
-			record.BusinessName,
-			record.PropertyAddress,
-			record.OwnerAddress,
-			city,
-			state,
-			title,
-			name,
-		}
-		if err := writer.Write(row); err != nil {
-			return err
-		}
-	}
+    for _, record := range records {
+        officials := record.Officials
+        if len(officials) == 0 {
+            officials = []string{""}
+        }
+        for _, official := range officials {
+            parts := strings.SplitN(official, ":", 2)
+            title := ""
+            name := official
+            if len(parts) == 2 {
+                title = strings.TrimSpace(parts[0])
+                name = strings.TrimSpace(parts[1])
+            }
+            row := []string{
+                record.ID,
+                record.Name,
+                record.BusinessName,
+                record.PropertyAddress,
+                record.City,
+                record.State,
+                record.Acres,
+                record.CalculatedAcres,
+                record.Zone,
+                record.TaxCodes,
+                record.SalePrice,
+                record.OwnerAddress,
+                title,
+                name,
+            }
+            if err := writer.Write(row); err != nil {
+                return err
+            }
+        }
+    }
 
-	return nil
+    return nil
 }
 
 func writeNamesFile(filename string, records []UnifiedRecord) error {

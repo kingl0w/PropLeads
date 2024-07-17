@@ -114,7 +114,6 @@ func removeDuplicates(slice []string) []string {
 func reconcileContactInfo(unifiedResults [][]string, wpResults []ContactInfo) [][]string {
     wpMap := make(map[string]ContactInfo)
     for _, wp := range wpResults {
-        // Normalize the name for better matching
         normalizedName := normalizeNameForMatching(wp.Name)
         wpMap[normalizedName] = wp
     }
@@ -123,10 +122,9 @@ func reconcileContactInfo(unifiedResults [][]string, wpResults []ContactInfo) []
     reconciledData = append(reconciledData, append(unifiedResults[0], "Phones", "Emails"))
 
     for _, row := range unifiedResults[1:] {
-        name := row[1] // Assuming the name is in the second column
-        officialName := row[8] // Assuming the official name is in the 9th column
+        name := row[1]  // Name is in the second column
+        officialName := row[13]  // Official Name is now in the 14th column
         
-        // Try matching with both name and official name
         normalizedName := normalizeNameForMatching(name)
         normalizedOfficialName := normalizeNameForMatching(officialName)
         
