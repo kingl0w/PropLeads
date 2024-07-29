@@ -122,15 +122,16 @@ func reconcileContactInfo(unifiedResults [][]string, wpResults []ContactInfo) []
     reconciledData = append(reconciledData, append(unifiedResults[0], "Phones", "Emails"))
 
     for _, row := range unifiedResults[1:] {
-        name := row[1]  // Name is in the second column
-        officialName := row[13]  // Official Name is now in the 14th column
-        
+        name := row[1]           
+        officialName := row[15]  
+                                 
+
         normalizedName := normalizeNameForMatching(name)
         normalizedOfficialName := normalizeNameForMatching(officialName)
-        
+
         var matchedWP ContactInfo
         var found bool
-        
+
         if wp, ok := wpMap[normalizedName]; ok {
             matchedWP = wp
             found = true

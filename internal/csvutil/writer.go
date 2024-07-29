@@ -16,17 +16,16 @@ func WriteParcelResults(filename string, parcels []county.Property) error {
         return err
     }
     defer file.Close()
-
     writer := csv.NewWriter(file)
     defer writer.Flush()
 
-    //Write header
-    header := []string{"ID", "PIN", "Owner", "Property Address", "Owner Address", "Acres", "Calculated Acres", "Zone", "Tax Codes", "Sale Price"}
+    // Write header
+    header := []string{"ID", "PIN", "Owner", "Property Address", "Owner Address", "Acres", "Calculated Acres", "Zone", "Tax Codes", "Sale Price", "Township", "County"}
     if err := writer.Write(header); err != nil {
         return err
     }
 
-    //Write data
+    // Write data
     for _, parcel := range parcels {
         ownerAddress := fmt.Sprintf("%s, %s, %s %s", parcel.ADDR, parcel.CITY, parcel.STATE, parcel.ZIP)
         salePrice := fmt.Sprintf("%.2f", parcel.SALE_PRICE)
@@ -44,12 +43,13 @@ func WriteParcelResults(filename string, parcels []county.Property) error {
             parcel.ZONE,
             parcel.TAX_CODES,
             salePrice,
+            parcel.TOWNSHIP,
+            parcel.COUNTY,
         }
         if err := writer.Write(row); err != nil {
             return err
         }
     }
-
     return nil
 }
 

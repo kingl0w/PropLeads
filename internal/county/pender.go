@@ -33,7 +33,6 @@ func getParcelInfo(c *colly.Collector, parcelID string) (Property, error) {
     baseURL := "https://gis.pendercountync.gov/arcgis/rest/services/Layers/MapServer/4/query"
     var parcelInfo Property
     var err error
-
     c.OnResponse(func(r *colly.Response) {
         var response Response
         err = json.Unmarshal(r.Body, &response)
@@ -41,23 +40,53 @@ func getParcelInfo(c *colly.Collector, parcelID string) (Property, error) {
             return
         }
         if len(response.Features) > 0 {
-            parcelInfo = response.Features[0].Attributes
+            attrs := response.Features[0].Attributes
+            parcelInfo = Property{
+                ALPHA:            attrs.ALPHA,
+                PIN:              attrs.PIN,
+                CALCACRES:        attrs.CALCACRES,
+                NAME:             attrs.NAME,
+                ADDR:             attrs.ADDR,
+                CITY:             attrs.CITY,
+                STATE:            attrs.STATE,
+                ZIP:              attrs.ZIP,
+                PROPERTY_ADDRESS: attrs.PROPERTY_ADDRESS,
+                ACRES:            attrs.ACRES,
+                ZONE:             attrs.ZONE,
+                TAX_CODES:        attrs.TAX_CODES,
+                SALE_PRICE:       attrs.SALE_PRICE,
+                COUNTY:           "Pender",
+                TOWNSHIP:         attrs.TNSH_DESC,
+            }
         } else {
             err = fmt.Errorf("no data found for parcel ID %s", parcelID)
         }
     })
-
     url := fmt.Sprintf("%s?f=json&where=ALPHA='%s'&returnGeometry=false&outFields=*", baseURL, parcelID)
     err = c.Visit(url)
     if err != nil {
         return Property{}, err
     }
-
     return parcelInfo, err
 }
 
 type Response struct {
     Features []struct {
-        Attributes Property `json:"attributes"`
+        Attributes struct {
+            ALPHA            string  `json:"ALPHA"`
+            PIN              string  `json:"PIN"`
+            CALCACRES        float64 `json:"CALCACRES"`
+            NAME             string  `json:"NAME"`
+            ADDR             string  `json:"ADDR"`
+            CITY             string  `json:"CITY"`
+            STATE            string  `json:"STATE"`
+            ZIP              string  `json:"ZIP"`
+            PROPERTY_ADDRESS string  `json:"PROPERTY_ADDRESS"`
+            ACRES            float64 `json:"ACRES"`
+            ZONE             string  `json:"ZONE"`
+            TAX_CODES        string  `json:"TAX_CODES"`
+            SALE_PRICE       float64 `json:"SALE_PRICE"`
+            TNSH_DESC        string  `json:"TNSH_DESC"`
+        } `json:"attributes"`
     } `json:"features"`
 }

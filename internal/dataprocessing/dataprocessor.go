@@ -25,6 +25,8 @@ type UnifiedRecord struct {
     SalePrice       string
     OwnerAddress    string
     Officials       []string
+    Township         string
+    County           string
 }
 
 func ProcessData(parcelFile, sosFile, unifiedOutputFile, namesOutputFile string) error {
@@ -85,7 +87,9 @@ func readParcelResults(filename string) ([]UnifiedRecord, error) {
             TaxCodes:        row[8],
             SalePrice:       row[9],
             OwnerAddress:    row[4],
-            Officials:       []string{}, // This will be filled later if applicable
+            Officials:       []string{},
+            Township:         row[10], 
+            County:           row[11],
         }
         results = append(results, record)
     }
@@ -141,7 +145,7 @@ func writeUnifiedOutput(filename string, records []UnifiedRecord) error {
     header := []string{
         "ID", "Name", "Business Name", "Property Address", "City", "State",
         "Acres", "Calculated Acres", "Zone", "Tax Codes", "Sale Price",
-        "Owner Address", "Official Title", "Official Name",
+        "Owner Address", "Township", "County", "Official Title", "Official Name",
     }
     if err := writer.Write(header); err != nil {
         return err
@@ -173,6 +177,8 @@ func writeUnifiedOutput(filename string, records []UnifiedRecord) error {
                 record.TaxCodes,
                 record.SalePrice,
                 record.OwnerAddress,
+                record.Township,
+                record.County,
                 title,
                 name,
             }
