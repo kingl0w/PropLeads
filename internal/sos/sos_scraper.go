@@ -10,6 +10,9 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
+// VerboseLogging controls the amount of logging output
+var VerboseLogging bool
+
 type Official struct {
 	Title string `json:"title"`
 	Name  string `json:"name"`
@@ -32,7 +35,13 @@ func LookupBusiness(companyName string) (BusinessInfo, error) {
     allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
     defer cancel()
 
-    ctx, cancel := chromedp.NewContext(allocCtx, chromedp.WithLogf(log.Printf))
+    // Use a no-op logger if verbose logging is disabled
+    logger := log.Printf
+    if !VerboseLogging {
+        logger = func(format string, args ...interface{}) {}
+    }
+
+    ctx, cancel := chromedp.NewContext(allocCtx, chromedp.WithLogf(logger))
     defer cancel()
 
     ctx, cancel = context.WithTimeout(ctx, 20*time.Second)
@@ -46,11 +55,7 @@ func LookupBusiness(companyName string) (BusinessInfo, error) {
         chromedp.WaitVisible(`#SearchCriteria`, chromedp.ByID),
         chromedp.SendKeys(`#SearchCriteria`, companyName, chromedp.ByID),
         chromedp.Click(`#SubmitButton`, chromedp.ByID),
-        chromedp.ActionFunc(func(ctx context.Context) error {
-            log.Printf("Clicked search button for %s", companyName)
-            return nil
-        }),
-        chromedp.Sleep(2*time.Second), // Add a short pause to allow the page to render
+        chromedp.Sleep(2*time.Second),
         chromedp.ActionFunc(func(ctx context.Context) error {
             return waitForResultsOrNoResults(ctx, companyName, &info)
         }),
@@ -58,11 +63,15 @@ func LookupBusiness(companyName string) (BusinessInfo, error) {
 
     if err != nil {
         if err == context.DeadlineExceeded {
-            log.Printf("Process took too long for %s", companyName)
+            if VerboseLogging {
+                log.Printf("Process took too long for %s", companyName)
+            }
             info.CompanyOfficials = append(info.CompanyOfficials, Official{Title: "Result", Name: "No match"})
             return info, nil
         }
-        log.Printf("Error occurred while processing %s: %v", companyName, err)
+        if VerboseLogging {
+            log.Printf("Error occurred while processing %s: %v", companyName, err)
+        }
         return BusinessInfo{}, fmt.Errorf("error scraping business info: %v", err)
     }
 
@@ -77,7 +86,9 @@ func waitForResultsOrNoResults(ctx context.Context, companyName string, info *Bu
     }
 
     if recordsFound == "Records Found: 0" {
-        log.Printf("No results found for %s", companyName)
+        if VerboseLogging {
+            log.Printf("No results found for %s", companyName)
+        }
         info.CompanyOfficials = append(info.CompanyOfficials, Official{Title: "Result", Name: "No match"})
         return nil
     }
@@ -172,8 +183,10 @@ func RetryTimedOutBusinesses(timedOutBusinesses []string) []BusinessInfo {
                 mu.Lock()
                 results = append(results, info)
                 mu.Unlock()
-                log.Printf("Retry successful for %s", name)
-            } else {
+                if VerboseLogging {
+                    log.Printf("Retry successful for %s", name)
+                }
+            } else if VerboseLogging {
                 log.Printf("Retry failed for %s: %v", name, err)
             }
         }(companyName)

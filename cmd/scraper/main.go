@@ -129,6 +129,8 @@ func runCountyScrape(countyName string) {
 }
 
 func runSOSScrape() {
+    sos.VerboseLogging = false
+
     parcelResultsFile := filepath.Join("data", "output", "parcel_results.csv")
     sosResultsFile := filepath.Join("data", "output", "sos_results.csv")
 
@@ -197,19 +199,22 @@ func worker(id int, jobs <-chan string, results chan<- sos.BusinessInfo, wg *syn
         var info sos.BusinessInfo
         var err error
         for attempts := 0; attempts < 3; attempts++ {
-            fmt.Printf("Worker %d looking up business: %s (Attempt %d)\n", id, businessName, attempts+1)
+            if sos.VerboseLogging {
+                fmt.Printf("Worker %d looking up business: %s (Attempt %d)\n", id, businessName, attempts+1)
+            }
             info, err = sos.LookupBusiness(businessName)
             if err == nil && len(info.CompanyOfficials) > 0 && info.CompanyOfficials[0].Name != "No match" {
                 break
             }
             if attempts < 2 {
-                // Random delay between 2 to 5 seconds
                 delay := time.Duration(2000 + rand.Intn(3000)) * time.Millisecond
                 time.Sleep(delay)
             }
         }
         if err != nil {
-            log.Printf("Error looking up business %s: %v\n", businessName, err)
+            if sos.VerboseLogging {
+                log.Printf("Error looking up business %s: %v\n", businessName, err)
+            }
             info = sos.BusinessInfo{BusinessName: businessName, CompanyOfficials: []sos.Official{{Title: "Result", Name: "No match"}}}
         }
         results <- info
