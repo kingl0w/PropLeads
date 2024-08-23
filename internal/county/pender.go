@@ -16,7 +16,6 @@ func NewPenderScraper() *PenderScraper {
 func (p *PenderScraper) Scrape(pids []string) ([]Property, error) {
     c := colly.NewCollector()
     var properties []Property
-
     for _, parcelID := range pids {
         info, err := getParcelInfo(c, parcelID)
         if err != nil {
@@ -25,7 +24,6 @@ func (p *PenderScraper) Scrape(pids []string) ([]Property, error) {
         }
         properties = append(properties, info)
     }
-
     return properties, nil
 }
 
@@ -33,6 +31,7 @@ func getParcelInfo(c *colly.Collector, parcelID string) (Property, error) {
     baseURL := "https://gis.pendercountync.gov/arcgis/rest/services/Layers/MapServer/4/query"
     var parcelInfo Property
     var err error
+
     c.OnResponse(func(r *colly.Response) {
         var response Response
         err = json.Unmarshal(r.Body, &response)
@@ -44,29 +43,34 @@ func getParcelInfo(c *colly.Collector, parcelID string) (Property, error) {
             parcelInfo = Property{
                 ALPHA:            attrs.ALPHA,
                 PIN:              attrs.PIN,
-                CALCACRES:        attrs.CALCACRES,
                 NAME:             attrs.NAME,
-                ADDR:             attrs.ADDR,
+                PROPERTY_ADDRESS: attrs.PROPERTY_ADDRESS,
                 CITY:             attrs.CITY,
+                ADDR:             attrs.ADDR,
                 STATE:            attrs.STATE,
                 ZIP:              attrs.ZIP,
-                PROPERTY_ADDRESS: attrs.PROPERTY_ADDRESS,
                 ACRES:            attrs.ACRES,
+                CALCACRES:        attrs.CALCACRES,
+                SQFT:             0, // Set to 0 if not available
                 ZONE:             attrs.ZONE,
                 TAX_CODES:        attrs.TAX_CODES,
+                APPRAISED:        0, // Set to 0 if not available
+                SALE_DATE:        "", // Set to empty string if not available
                 SALE_PRICE:       attrs.SALE_PRICE,
-                COUNTY:           "Pender",
                 TOWNSHIP:         attrs.TNSH_DESC,
+                COUNTY:           "Pender",
             }
         } else {
             err = fmt.Errorf("no data found for parcel ID %s", parcelID)
         }
     })
+
     url := fmt.Sprintf("%s?f=json&where=ALPHA='%s'&returnGeometry=false&outFields=*", baseURL, parcelID)
     err = c.Visit(url)
     if err != nil {
         return Property{}, err
     }
+
     return parcelInfo, err
 }
 

@@ -43,6 +43,7 @@ func readUnifiedResults(path string) ([][]string, error) {
     defer file.Close()
 
     reader := csv.NewReader(file)
+    reader.FieldsPerRecord = -1  // Allow variable number of fields
     records, err := reader.ReadAll()
     if err != nil {
         return nil, fmt.Errorf("failed to read unified results: %v", err)
@@ -122,9 +123,8 @@ func reconcileContactInfo(unifiedResults [][]string, wpResults []ContactInfo) []
     reconciledData = append(reconciledData, append(unifiedResults[0], "Phones", "Emails"))
 
     for _, row := range unifiedResults[1:] {
-        name := row[1]           
-        officialName := row[15]  
-                                 
+        name := row[2]  // Name is now in the third column
+        officialName := row[19]  // Official Name is now in the 20th column
 
         normalizedName := normalizeNameForMatching(name)
         normalizedOfficialName := normalizeNameForMatching(officialName)

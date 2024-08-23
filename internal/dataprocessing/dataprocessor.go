@@ -13,6 +13,7 @@ import (
 
 type UnifiedRecord struct {
     ID              string
+    PIN             string
     Name            string
     BusinessName    string
     PropertyAddress string
@@ -20,13 +21,16 @@ type UnifiedRecord struct {
     State           string
     Acres           string
     CalculatedAcres string
+    SQFT            string
     Zone            string
     TaxCodes        string
+    Appraised       string
+    SaleDate        string
     SalePrice       string
     OwnerAddress    string
     Officials       []string
-    Township         string
-    County           string
+    Township        string
+    County          string
 }
 
 func ProcessData(parcelFile, sosFile, unifiedOutputFile, namesOutputFile string) error {
@@ -70,27 +74,36 @@ func readParcelResults(filename string) ([]UnifiedRecord, error) {
 
     var results []UnifiedRecord
     for _, row := range records[1:] { // Skip header
-        if len(row) < 10 {
+        if len(row) < 16 {
             continue // Skip rows with insufficient data
         }
-        city, state := extractCityState(row[4]) // Extract city and state from owner address
         record := UnifiedRecord{
             ID:              row[0],
             Name:            row[2],
             BusinessName:    "", // This will be filled later if it's a business
             PropertyAddress: row[3],
-            City:            city,
-            State:           state,
-            Acres:           row[5],
-            CalculatedAcres: row[6],
-            Zone:            row[7],
-            TaxCodes:        row[8],
-            SalePrice:       row[9],
-            OwnerAddress:    row[4],
+            City:            row[4], // This is blank for Pender County
+            State:           "", // Extract from Owner Address
+            Acres:           row[6],
+            CalculatedAcres: row[7],
+            Zone:            row[9],
+            TaxCodes:        row[10],
+            SalePrice:       row[13],
+            OwnerAddress:    row[5],
             Officials:       []string{},
-            Township:         row[10], 
-            County:           row[11],
+            Township:        row[14],
+            County:          row[15],
         }
+
+        // Extract State from Owner Address
+        parts := strings.Split(record.OwnerAddress, ",")
+        if len(parts) >= 3 {
+            stateParts := strings.Fields(strings.TrimSpace(parts[2]))
+            if len(stateParts) > 0 {
+                record.State = stateParts[0]
+            }
+        }
+
         results = append(results, record)
     }
     return results, nil
@@ -114,21 +127,21 @@ func readSOSResults(filename string) (map[string][]string, error) {
 }
 
 func mergeRecords(parcelRecords []UnifiedRecord, sosRecords map[string][]string) []UnifiedRecord {
-	var mergedRecords []UnifiedRecord
-	for _, record := range parcelRecords {
-		if officials, ok := sosRecords[record.Name]; ok {
-			for _, official := range officials {
-				newRecord := record 
-				newRecord.BusinessName = record.Name
-				newRecord.Officials = []string{official}
-				mergedRecords = append(mergedRecords, newRecord)
-			}
-		} else {
-			record.Officials = []string{extractName(record.Name)}
-			mergedRecords = append(mergedRecords, record)
-		}
-	}
-	return mergedRecords
+    var mergedRecords []UnifiedRecord
+    for _, record := range parcelRecords {
+        if officials, ok := sosRecords[record.Name]; ok {
+            for _, official := range officials {
+                newRecord := record 
+                newRecord.BusinessName = record.Name
+                newRecord.Officials = []string{official}
+                mergedRecords = append(mergedRecords, newRecord)
+            }
+        } else {
+            record.Officials = []string{extractName(record.Name)}
+            mergedRecords = append(mergedRecords, record)
+        }
+    }
+    return mergedRecords
 }
 
 func writeUnifiedOutput(filename string, records []UnifiedRecord) error {
@@ -141,10 +154,9 @@ func writeUnifiedOutput(filename string, records []UnifiedRecord) error {
     writer := csv.NewWriter(file)
     defer writer.Flush()
 
-    // Update header to match the new order
     header := []string{
-        "ID", "Name", "Business Name", "Property Address", "City", "State",
-        "Acres", "Calculated Acres", "Zone", "Tax Codes", "Sale Price",
+        "ID", "PIN", "Name", "Business Name", "Property Address", "City", "State",
+        "Acres", "Calculated Acres", "SQFT", "Zone", "Tax Codes", "Appraised", "Sale Date", "Sale Price",
         "Owner Address", "Township", "County", "Official Title", "Official Name",
     }
     if err := writer.Write(header); err != nil {
@@ -166,6 +178,7 @@ func writeUnifiedOutput(filename string, records []UnifiedRecord) error {
             }
             row := []string{
                 record.ID,
+                record.PIN,  // Use PIN field instead of ID
                 record.Name,
                 record.BusinessName,
                 record.PropertyAddress,
@@ -173,8 +186,11 @@ func writeUnifiedOutput(filename string, records []UnifiedRecord) error {
                 record.State,
                 record.Acres,
                 record.CalculatedAcres,
+                record.SQFT,           // Use SQFT field from UnifiedRecord
                 record.Zone,
                 record.TaxCodes,
+                record.Appraised,      // Use Appraised field from UnifiedRecord
+                record.SaleDate,       // Use SaleDate field from UnifiedRecord
                 record.SalePrice,
                 record.OwnerAddress,
                 record.Township,
@@ -198,7 +214,6 @@ func writeNamesFile(filename string, records []UnifiedRecord) error {
     }
     defer file.Close()
 
-    // Use a custom writer to add spaces after commas
     writer := csv.NewWriter(file)
     writer.Comma = ','
     defer writer.Flush()
@@ -211,15 +226,14 @@ func writeNamesFile(filename string, records []UnifiedRecord) error {
     uniqueNames := make(map[string]struct{})
 
     for _, record := range records {
-        city, state := extractCityState(record.OwnerAddress)
         for _, official := range record.Officials {
             _, name := extractNameAndTitle(official)
             name = strings.TrimRight(name, ",") // Remove trailing comma
             if name != "" && !strings.EqualFold(name, "No match") && !isBusinessName(name) {
-                key := fmt.Sprintf("%s,%s,%s", name, city, state)
+                key := fmt.Sprintf("%s,%s,%s", name, record.City, record.State)
                 if _, exists := uniqueNames[key]; !exists {
                     uniqueNames[key] = struct{}{}
-                    if err := writer.Write([]string{name, city, state}); err != nil {
+                    if err := writer.Write([]string{name, record.City, record.State}); err != nil {
                         return err
                     }
                 }
@@ -252,18 +266,18 @@ func readCSV(filename string) ([][]string, error) {
 	return reader.ReadAll()
 }
 
-func extractCityState(address string) (string, string) {
-	parts := strings.Split(address, ",")
-	if len(parts) >= 3 {
-		city := strings.TrimSpace(parts[len(parts)-2])
-		stateZip := strings.TrimSpace(parts[len(parts)-1])
-		stateParts := strings.Fields(stateZip)
-		if len(stateParts) > 0 {
-			return city, stateParts[0]
-		}
-	}
-	return "", ""
-}
+// func extractCityState(address string) (string, string) {
+// 	parts := strings.Split(address, ",")
+// 	if len(parts) >= 3 {
+// 		city := strings.TrimSpace(parts[len(parts)-2])
+// 		stateZip := strings.TrimSpace(parts[len(parts)-1])
+// 		stateParts := strings.Fields(stateZip)
+// 		if len(stateParts) > 0 {
+// 			return city, stateParts[0]
+// 		}
+// 	}
+// 	return "", ""
+// }
 
 func extractName(s string) string {
 	s = strings.Trim(s, "\"")

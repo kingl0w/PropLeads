@@ -16,11 +16,12 @@ func WriteParcelResults(filename string, parcels []county.Property) error {
         return err
     }
     defer file.Close()
+
     writer := csv.NewWriter(file)
     defer writer.Flush()
 
     // Write header
-    header := []string{"ID", "PIN", "Owner", "Property Address", "Owner Address", "Acres", "Calculated Acres", "Zone", "Tax Codes", "Sale Price", "Township", "County"}
+    header := []string{"ID", "PIN", "Owner", "Property Address", "City", "Owner Address", "Acres", "Calculated Acres", "SQFT", "Zone", "Tax Codes", "Appraised", "Sale Date", "Sale Price", "Township", "County"}
     if err := writer.Write(header); err != nil {
         return err
     }
@@ -28,21 +29,22 @@ func WriteParcelResults(filename string, parcels []county.Property) error {
     // Write data
     for _, parcel := range parcels {
         ownerAddress := fmt.Sprintf("%s, %s, %s %s", parcel.ADDR, parcel.CITY, parcel.STATE, parcel.ZIP)
-        salePrice := fmt.Sprintf("%.2f", parcel.SALE_PRICE)
-        if parcel.SALE_PRICE == 0 {
-            salePrice = "Not available"
-        }
+        
         row := []string{
             parcel.ALPHA,
             parcel.PIN,
             parcel.NAME,
             parcel.PROPERTY_ADDRESS,
+            parcel.CITY,
             ownerAddress,
-            fmt.Sprintf("%.2f", parcel.ACRES),
-            fmt.Sprintf("%.2f", parcel.CALCACRES),
+            formatFloat(parcel.ACRES),
+            formatFloat(parcel.CALCACRES),
+            formatFloat(parcel.SQFT),
             parcel.ZONE,
             parcel.TAX_CODES,
-            salePrice,
+            formatFloat(parcel.APPRAISED),
+            parcel.SALE_DATE,
+            formatFloat(parcel.SALE_PRICE),
             parcel.TOWNSHIP,
             parcel.COUNTY,
         }
@@ -51,6 +53,13 @@ func WriteParcelResults(filename string, parcels []county.Property) error {
         }
     }
     return nil
+}
+
+func formatFloat(f float64) string {
+    if f == 0 {
+        return ""
+    }
+    return fmt.Sprintf("%.2f", f)
 }
 
 func WriteSOSResults(filename string, businesses []sos.BusinessInfo) error {
