@@ -6,6 +6,8 @@ import (
 	"os"
 	"regexp"
 	"strings"
+
+	"github.com/kingl0w/PropLeads/internal/dataprocessing"
 )
 
 type ContactInfo struct {
@@ -33,6 +35,48 @@ func ReconcileData(unifiedResultsPath, wpSearchPath, outputPath string) error {
     }
 
     return nil
+}
+
+func reconcileContactInfo(unifiedResults [][]string, wpResults []ContactInfo) [][]string {
+    wpMap := make(map[string]ContactInfo)
+    for _, wp := range wpResults {
+        normalizedName := normalizeNameForMatching(wp.Name)
+        wpMap[normalizedName] = wp
+    }
+
+    var reconciledData [][]string
+    reconciledData = append(reconciledData, append(dataprocessing.HeadersConfig.UnifiedResults, "Phones", "Emails"))
+
+    for _, row := range unifiedResults[1:] {
+        nameIndex := indexOf(dataprocessing.HeadersConfig.UnifiedResults, "Name")
+        officialNameIndex := indexOf(dataprocessing.HeadersConfig.UnifiedResults, "Official Name")
+        
+        name := row[nameIndex]
+        officialName := row[officialNameIndex]
+
+        normalizedName := normalizeNameForMatching(name)
+        normalizedOfficialName := normalizeNameForMatching(officialName)
+
+        var matchedWP ContactInfo
+        var found bool
+
+        if wp, ok := wpMap[normalizedName]; ok {
+            matchedWP = wp
+            found = true
+        } else if wp, ok := wpMap[normalizedOfficialName]; ok {
+            matchedWP = wp
+            found = true
+        }
+
+        if found {
+            row = append(row, strings.Join(matchedWP.Phones, "; "), strings.Join(matchedWP.Emails, "; "))
+        } else {
+            row = append(row, "", "")
+        }
+        reconciledData = append(reconciledData, row)
+    }
+
+    return reconciledData
 }
 
 func readUnifiedResults(path string) ([][]string, error) {
@@ -112,45 +156,6 @@ func removeDuplicates(slice []string) []string {
     return list
 }
 
-func reconcileContactInfo(unifiedResults [][]string, wpResults []ContactInfo) [][]string {
-    wpMap := make(map[string]ContactInfo)
-    for _, wp := range wpResults {
-        normalizedName := normalizeNameForMatching(wp.Name)
-        wpMap[normalizedName] = wp
-    }
-
-    var reconciledData [][]string
-    reconciledData = append(reconciledData, append(unifiedResults[0], "Phones", "Emails"))
-
-    for _, row := range unifiedResults[1:] {
-        name := row[2]  // Name is now in the third column
-        officialName := row[19]  // Official Name is now in the 20th column
-
-        normalizedName := normalizeNameForMatching(name)
-        normalizedOfficialName := normalizeNameForMatching(officialName)
-
-        var matchedWP ContactInfo
-        var found bool
-
-        if wp, ok := wpMap[normalizedName]; ok {
-            matchedWP = wp
-            found = true
-        } else if wp, ok := wpMap[normalizedOfficialName]; ok {
-            matchedWP = wp
-            found = true
-        }
-
-        if found {
-            row = append(row, strings.Join(matchedWP.Phones, "; "), strings.Join(matchedWP.Emails, "; "))
-        } else {
-            row = append(row, "", "")
-        }
-        reconciledData = append(reconciledData, row)
-    }
-
-    return reconciledData
-}
-
 func normalizeNameForMatching(name string) string {
     // Remove common prefixes and suffixes, convert to lowercase, and remove punctuation
     name = strings.ToLower(name)
@@ -182,7 +187,23 @@ func writeReconciledData(path string, data [][]string) error {
     writer := csv.NewWriter(file)
     defer writer.Flush()
 
-    return writer.WriteAll(data)
+    // Write header
+    header := append(dataprocessing.HeadersConfig.UnifiedResults, "Phones", "Emails")
+    if err := writer.Write(header); err != nil {
+        return err
+    }
+
+    // Write data (skip the first row as it's the header)
+    return writer.WriteAll(data[1:])
+}
+
+func indexOf(slice []string, item string) int {
+    for i, s := range slice {
+        if s == item {
+            return i
+        }
+    }
+    return -1
 }
 
 func extractPhones(s string) []string {

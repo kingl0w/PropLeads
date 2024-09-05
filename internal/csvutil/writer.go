@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/kingl0w/PropLeads/internal/county"
+	"github.com/kingl0w/PropLeads/internal/dataprocessing"
 	"github.com/kingl0w/PropLeads/internal/sos"
 )
 
@@ -16,27 +17,26 @@ func WriteParcelResults(filename string, parcels []county.Property) error {
         return err
     }
     defer file.Close()
-
     writer := csv.NewWriter(file)
     defer writer.Flush()
 
     // Write header
-    header := []string{"ID", "PIN", "Owner", "Property Address", "City", "Owner Address", "Acres", "Calculated Acres", "SQFT", "Zone", "Tax Codes", "Appraised", "Sale Date", "Sale Price", "Township", "County"}
-    if err := writer.Write(header); err != nil {
+    if err := writer.Write(dataprocessing.HeadersConfig.ParcelResults); err != nil {
         return err
     }
 
     // Write data
     for _, parcel := range parcels {
-        ownerAddress := fmt.Sprintf("%s, %s, %s %s", parcel.ADDR, parcel.CITY, parcel.STATE, parcel.ZIP)
-        
         row := []string{
             parcel.ALPHA,
             parcel.PIN,
             parcel.NAME,
             parcel.PROPERTY_ADDRESS,
-            parcel.CITY,
-            ownerAddress,
+            parcel.PROPERTY_CITY,
+            parcel.PROPERTY_STATE,
+            parcel.OWNER_ADDRESS,
+            parcel.OWNER_CITY,
+            parcel.OWNER_STATE,
             formatFloat(parcel.ACRES),
             formatFloat(parcel.CALCACRES),
             formatFloat(parcel.SQFT),
@@ -68,12 +68,10 @@ func WriteSOSResults(filename string, businesses []sos.BusinessInfo) error {
         return err
     }
     defer file.Close()
-
     writer := csv.NewWriter(file)
     defer writer.Flush()
 
-    header := []string{"Business Name", "Company Officials"}
-    if err := writer.Write(header); err != nil {
+    if err := writer.Write(dataprocessing.HeadersConfig.SOSResults); err != nil {
         return err
     }
 
@@ -100,6 +98,5 @@ func WriteSOSResults(filename string, businesses []sos.BusinessInfo) error {
             }
         }
     }
-
     return nil
 }

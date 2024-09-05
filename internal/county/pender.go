@@ -3,6 +3,7 @@ package county
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/gocolly/colly/v2"
 )
@@ -31,7 +32,6 @@ func getParcelInfo(c *colly.Collector, parcelID string) (Property, error) {
     baseURL := "https://gis.pendercountync.gov/arcgis/rest/services/Layers/MapServer/4/query"
     var parcelInfo Property
     var err error
-
     c.OnResponse(func(r *colly.Response) {
         var response Response
         err = json.Unmarshal(r.Body, &response)
@@ -45,10 +45,12 @@ func getParcelInfo(c *colly.Collector, parcelID string) (Property, error) {
                 PIN:              attrs.PIN,
                 NAME:             attrs.NAME,
                 PROPERTY_ADDRESS: attrs.PROPERTY_ADDRESS,
-                CITY:             attrs.CITY,
-                ADDR:             attrs.ADDR,
-                STATE:            attrs.STATE,
-                ZIP:              attrs.ZIP,
+                PROPERTY_CITY:    "", // Leave property city blank for Pender County
+                PROPERTY_STATE:   "NC", // Always set to NC for Pender County
+                OWNER_ADDRESS:    attrs.ADDR,
+                OWNER_CITY:       attrs.CITY, // Use the CITY field from the API response
+                OWNER_STATE:      attrs.STATE,
+                OWNER_ZIP:        attrs.ZIP,
                 ACRES:            attrs.ACRES,
                 CALCACRES:        attrs.CALCACRES,
                 SQFT:             0, // Set to 0 if not available
@@ -64,14 +66,26 @@ func getParcelInfo(c *colly.Collector, parcelID string) (Property, error) {
             err = fmt.Errorf("no data found for parcel ID %s", parcelID)
         }
     })
-
     url := fmt.Sprintf("%s?f=json&where=ALPHA='%s'&returnGeometry=false&outFields=*", baseURL, parcelID)
     err = c.Visit(url)
     if err != nil {
         return Property{}, err
     }
-
     return parcelInfo, err
+}
+func extractCityStateZip(address string) (string, string, string) {
+    parts := strings.Split(address, ",")
+    if len(parts) >= 2 {
+        stateZip := strings.TrimSpace(parts[len(parts)-1])
+        stateParts := strings.Fields(stateZip)
+        if len(stateParts) >= 2 {
+            return "", stateParts[0], stateParts[1]
+        }
+        if len(stateParts) == 1 {
+            return "", "NC", stateParts[0] // Assume NC if only ZIP is present
+        }
+    }
+    return "", "NC", "" // Default to NC if unable to parse
 }
 
 type Response struct {

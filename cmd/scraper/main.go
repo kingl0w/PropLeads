@@ -103,7 +103,8 @@ func runCountyScrape(countyName string) {
         fmt.Printf("  PIN: %s\n", info.PIN)
         fmt.Printf("  Owner: %s\n", info.NAME)
         fmt.Printf("  Property Address: %s\n", info.PROPERTY_ADDRESS)
-        fmt.Printf("  Owner Address: %s, %s, %s %s\n", info.ADDR, info.CITY, info.STATE, info.ZIP)
+        fmt.Printf("  Property City: %s\n", info.PROPERTY_CITY)
+        fmt.Printf("  Owner Address: %s, %s, %s %s\n", info.OWNER_ADDRESS, info.OWNER_CITY, info.OWNER_STATE, info.OWNER_ZIP)
         fmt.Printf("  Acres: %.2f (Calculated: %.2f)\n", info.ACRES, info.CALCACRES)
         fmt.Printf("  Zone: %s\n", info.ZONE)
         fmt.Printf("  Tax Codes: %s\n", info.TAX_CODES)
@@ -143,7 +144,11 @@ func runSOSScrape() {
     // Extract unique business names
     uniqueBusinesses := make(map[string]bool)
     for _, parcel := range parcels {
-        ownerName := parcel["Owner"]
+        ownerName, ok := parcel["Owner"]
+        if !ok {
+            log.Printf("Warning: 'Owner' field not found in parcel data")
+            continue
+        }
         if csv.IsBusinessName(ownerName) {
             uniqueBusinesses[ownerName] = true
         }

@@ -74,35 +74,32 @@ func readParcelResults(filename string) ([]UnifiedRecord, error) {
 
     var results []UnifiedRecord
     for _, row := range records[1:] { // Skip header
-        if len(row) < 16 {
+        if len(row) < len(HeadersConfig.ParcelResults) {
             continue // Skip rows with insufficient data
         }
         record := UnifiedRecord{
             ID:              row[0],
+            PIN:             row[1],
             Name:            row[2],
-            BusinessName:    "", // This will be filled later if it's a business
             PropertyAddress: row[3],
-            City:            row[4], // This is blank for Pender County
-            State:           "", // Extract from Owner Address
+            City:            row[4],
+            OwnerAddress:    row[5],
             Acres:           row[6],
             CalculatedAcres: row[7],
+            SQFT:            row[8],
             Zone:            row[9],
             TaxCodes:        row[10],
+            Appraised:       row[11],
+            SaleDate:        row[12],
             SalePrice:       row[13],
-            OwnerAddress:    row[5],
-            Officials:       []string{},
             Township:        row[14],
             County:          row[15],
+            BusinessName:    "",
+            Officials:       []string{},
+            State:           "", // Extract from Owner Address
         }
 
-        // Extract State from Owner Address
-        parts := strings.Split(record.OwnerAddress, ",")
-        if len(parts) >= 3 {
-            stateParts := strings.Fields(strings.TrimSpace(parts[2]))
-            if len(stateParts) > 0 {
-                record.State = stateParts[0]
-            }
-        }
+        // Extract State from Owner Address (keep this part as is)
 
         results = append(results, record)
     }
@@ -154,15 +151,12 @@ func writeUnifiedOutput(filename string, records []UnifiedRecord) error {
     writer := csv.NewWriter(file)
     defer writer.Flush()
 
-    header := []string{
-        "ID", "PIN", "Name", "Business Name", "Property Address", "City", "State",
-        "Acres", "Calculated Acres", "SQFT", "Zone", "Tax Codes", "Appraised", "Sale Date", "Sale Price",
-        "Owner Address", "Township", "County", "Official Title", "Official Name",
-    }
-    if err := writer.Write(header); err != nil {
+    // Write header
+    if err := writer.Write(HeadersConfig.UnifiedResults); err != nil {
         return err
     }
 
+    // Rest of the function remains the same
     for _, record := range records {
         officials := record.Officials
         if len(officials) == 0 {
@@ -178,7 +172,7 @@ func writeUnifiedOutput(filename string, records []UnifiedRecord) error {
             }
             row := []string{
                 record.ID,
-                record.PIN,  // Use PIN field instead of ID
+                record.PIN,
                 record.Name,
                 record.BusinessName,
                 record.PropertyAddress,
@@ -186,11 +180,11 @@ func writeUnifiedOutput(filename string, records []UnifiedRecord) error {
                 record.State,
                 record.Acres,
                 record.CalculatedAcres,
-                record.SQFT,           // Use SQFT field from UnifiedRecord
+                record.SQFT,
                 record.Zone,
                 record.TaxCodes,
-                record.Appraised,      // Use Appraised field from UnifiedRecord
-                record.SaleDate,       // Use SaleDate field from UnifiedRecord
+                record.Appraised,
+                record.SaleDate,
                 record.SalePrice,
                 record.OwnerAddress,
                 record.Township,
@@ -219,10 +213,11 @@ func writeNamesFile(filename string, records []UnifiedRecord) error {
     defer writer.Flush()
 
     // Write header
-    if err := writer.Write([]string{"Name", "City", "State"}); err != nil {
+    if err := writer.Write(HeadersConfig.Names); err != nil {
         return err
     }
 
+    // Rest of the function remains the same
     uniqueNames := make(map[string]struct{})
 
     for _, record := range records {
