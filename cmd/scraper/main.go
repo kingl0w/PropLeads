@@ -181,10 +181,10 @@ func runSOSScrape() {
     var businessInfos []sos.BusinessInfo
     for info := range results {
         businessInfos = append(businessInfos, info)
-        if len(info.CompanyOfficials) == 0 {
-            log.Printf("No officials found for business %s\n", info.BusinessName)
+        if len(info.CompanyOfficials) == 0 || (len(info.CompanyOfficials) == 1 && info.CompanyOfficials[0].Name == "No match") {
+            log.Printf("0 officials found for %s", info.BusinessName)
         } else {
-            log.Printf("Found %d officials for %s\n", len(info.CompanyOfficials), info.BusinessName)
+            log.Printf("Found %d officials for %s", len(info.CompanyOfficials), info.BusinessName)
             for i, official := range info.CompanyOfficials {
                 log.Printf("  Official %d: %s - %s", i+1, official.Title, official.Name)
             }

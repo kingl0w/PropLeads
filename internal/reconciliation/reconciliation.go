@@ -6,8 +6,6 @@ import (
 	"os"
 	"regexp"
 	"strings"
-
-	"github.com/kingl0w/PropLeads/internal/dataprocessing"
 )
 
 type ContactInfo struct {
@@ -22,12 +20,22 @@ func ReconcileData(unifiedResultsPath, wpSearchPath, outputPath string) error {
         return fmt.Errorf("error reading unified results: %v", err)
     }
 
+    if len(unifiedResults) == 0 {
+        return fmt.Errorf("unified results file is empty")
+    }
+
+    fmt.Printf("Unified results headers: %v\n", unifiedResults[0])
+
     wpResults, err := readWPResults(wpSearchPath)
     if err != nil {
         return fmt.Errorf("error reading WP search results: %v", err)
     }
 
+    fmt.Printf("Number of WP search results: %d\n", len(wpResults))
+
     reconciledData := reconcileContactInfo(unifiedResults, wpResults)
+
+    fmt.Printf("Number of reconciled records: %d\n", len(reconciledData)-1) // -1 for header
 
     err = writeReconciledData(outputPath, reconciledData)
     if err != nil {
@@ -45,25 +53,38 @@ func reconcileContactInfo(unifiedResults [][]string, wpResults []ContactInfo) []
     }
 
     var reconciledData [][]string
-    reconciledData = append(reconciledData, append(dataprocessing.HeadersConfig.UnifiedResults, "Phones", "Emails"))
+    reconciledData = append(reconciledData, append(unifiedResults[0], "Phones", "Emails"))
+
+    ownerIndex := indexOf(unifiedResults[0], "Owner")
+    businessNameIndex := indexOf(unifiedResults[0], "Business Name")
+    officialNameIndex := indexOf(unifiedResults[0], "Official Name")
 
     for _, row := range unifiedResults[1:] {
-        nameIndex := indexOf(dataprocessing.HeadersConfig.UnifiedResults, "Name")
-        officialNameIndex := indexOf(dataprocessing.HeadersConfig.UnifiedResults, "Official Name")
-        
-        name := row[nameIndex]
-        officialName := row[officialNameIndex]
+        owner := row[ownerIndex]
+        businessName := ""
+        if businessNameIndex != -1 && businessNameIndex < len(row) {
+            businessName = row[businessNameIndex]
+        }
+        officialName := ""
+        if officialNameIndex != -1 && officialNameIndex < len(row) {
+            officialName = row[officialNameIndex]
+        }
 
-        normalizedName := normalizeNameForMatching(name)
+        normalizedOwner := normalizeNameForMatching(owner)
+        normalizedBusinessName := normalizeNameForMatching(businessName)
         normalizedOfficialName := normalizeNameForMatching(officialName)
 
         var matchedWP ContactInfo
         var found bool
 
-        if wp, ok := wpMap[normalizedName]; ok {
+        // Try matching with business name first, then owner, then official name
+        if wp, ok := wpMap[normalizedBusinessName]; ok && businessName != "" {
             matchedWP = wp
             found = true
-        } else if wp, ok := wpMap[normalizedOfficialName]; ok {
+        } else if wp, ok := wpMap[normalizedOwner]; ok {
+            matchedWP = wp
+            found = true
+        } else if wp, ok := wpMap[normalizedOfficialName]; ok && officialName != "" {
             matchedWP = wp
             found = true
         }
@@ -187,23 +208,44 @@ func writeReconciledData(path string, data [][]string) error {
     writer := csv.NewWriter(file)
     defer writer.Flush()
 
-    // Write header
-    header := append(dataprocessing.HeadersConfig.UnifiedResults, "Phones", "Emails")
+    // Find the index of the PIN column
+    pinIndex := indexOf(data[0], "PIN")
+
+    // Write header (excluding PIN)
+    header := make([]string, 0, len(data[0])-1)
+    for i, field := range data[0] {
+        if i != pinIndex {
+            header = append(header, field)
+        }
+    }
     if err := writer.Write(header); err != nil {
         return err
     }
 
-    // Write data (skip the first row as it's the header)
-    return writer.WriteAll(data[1:])
+    // Write data (excluding PIN)
+    for _, row := range data[1:] {
+        newRow := make([]string, 0, len(row)-1)
+        for i, field := range row {
+            if i != pinIndex {
+                newRow = append(newRow, field)
+            }
+        }
+        if err := writer.Write(newRow); err != nil {
+            return err
+        }
+    }
+
+    return nil
 }
 
+// Helper function to find index of a string in a slice
 func indexOf(slice []string, item string) int {
     for i, s := range slice {
         if s == item {
             return i
         }
     }
-    return -1
+    return -1  // If not found
 }
 
 func extractPhones(s string) []string {

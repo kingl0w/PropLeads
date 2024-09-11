@@ -17,8 +17,11 @@ type UnifiedRecord struct {
     Name            string
     BusinessName    string
     PropertyAddress string
-    City            string
-    State           string
+    PropertyCity    string
+    PropertyState   string
+    OwnerAddress    string
+    OwnerCity       string
+    OwnerState      string
     Acres           string
     CalculatedAcres string
     SQFT            string
@@ -27,7 +30,6 @@ type UnifiedRecord struct {
     Appraised       string
     SaleDate        string
     SalePrice       string
-    OwnerAddress    string
     Officials       []string
     Township        string
     County          string
@@ -82,24 +84,24 @@ func readParcelResults(filename string) ([]UnifiedRecord, error) {
             PIN:             row[1],
             Name:            row[2],
             PropertyAddress: row[3],
-            City:            row[4],
-            OwnerAddress:    row[5],
-            Acres:           row[6],
-            CalculatedAcres: row[7],
-            SQFT:            row[8],
-            Zone:            row[9],
-            TaxCodes:        row[10],
-            Appraised:       row[11],
-            SaleDate:        row[12],
-            SalePrice:       row[13],
-            Township:        row[14],
-            County:          row[15],
+            PropertyCity:    row[4],
+            PropertyState:   row[5],
+            OwnerAddress:    row[6],
+            OwnerCity:       row[7],
+            OwnerState:      row[8],
+            Acres:           row[9],
+            CalculatedAcres: row[10],
+            SQFT:            row[11],
+            Zone:            row[12],
+            TaxCodes:        row[13],
+            Appraised:       row[14],
+            SaleDate:        row[15],
+            SalePrice:       row[16],
+            Township:        row[17],
+            County:          row[18],
             BusinessName:    "",
             Officials:       []string{},
-            State:           "", // Extract from Owner Address
         }
-
-        // Extract State from Owner Address (keep this part as is)
 
         results = append(results, record)
     }
@@ -156,7 +158,7 @@ func writeUnifiedOutput(filename string, records []UnifiedRecord) error {
         return err
     }
 
-    // Rest of the function remains the same
+    // Write data
     for _, record := range records {
         officials := record.Officials
         if len(officials) == 0 {
@@ -176,8 +178,11 @@ func writeUnifiedOutput(filename string, records []UnifiedRecord) error {
                 record.Name,
                 record.BusinessName,
                 record.PropertyAddress,
-                record.City,
-                record.State,
+                record.PropertyCity,
+                record.PropertyState,
+                record.OwnerAddress,
+                record.OwnerCity,
+                record.OwnerState,
                 record.Acres,
                 record.CalculatedAcres,
                 record.SQFT,
@@ -186,7 +191,6 @@ func writeUnifiedOutput(filename string, records []UnifiedRecord) error {
                 record.Appraised,
                 record.SaleDate,
                 record.SalePrice,
-                record.OwnerAddress,
                 record.Township,
                 record.County,
                 title,
@@ -197,7 +201,6 @@ func writeUnifiedOutput(filename string, records []UnifiedRecord) error {
             }
         }
     }
-
     return nil
 }
 
@@ -217,30 +220,28 @@ func writeNamesFile(filename string, records []UnifiedRecord) error {
         return err
     }
 
-    // Rest of the function remains the same
+    // Write data
     uniqueNames := make(map[string]struct{})
-
     for _, record := range records {
         for _, official := range record.Officials {
             _, name := extractNameAndTitle(official)
             name = strings.TrimRight(name, ",") // Remove trailing comma
             if name != "" && !strings.EqualFold(name, "No match") && !isBusinessName(name) {
-                key := fmt.Sprintf("%s,%s,%s", name, record.City, record.State)
+                key := fmt.Sprintf("%s,%s,%s", name, record.OwnerCity, record.OwnerState)
                 if _, exists := uniqueNames[key]; !exists {
                     uniqueNames[key] = struct{}{}
-                    if err := writer.Write([]string{name, record.City, record.State}); err != nil {
+                    if err := writer.Write([]string{name, record.OwnerCity, record.OwnerState}); err != nil {
                         return err
                     }
                 }
             }
         }
     }
-
     return nil
 }
 
 func isBusinessName(name string) bool {
-	businessIndicators := []string{"LLC", "INC", "CORP", "LTD", "COMPANY", "PROPERTIES", "ENTERPRISES", "HOLDINGS", "GROUP", "INVESTMENT", "MANAGEMENT", "ASSOCIATES", "SERVICES", "PROPERTY"}
+	businessIndicators := []string{"LLC", "INC", "CORP", "LTD", "COMPANY", "PROPERTIES", "ENTERPRISES", "HOLDINGS", "GROUP", "INVESTMENT", "MANAGEMENT", "ASSOCIATES", "SERVICES", "PROPERTY", "PARTNERS", "ASSOCIATION", "TRUST"}
 	upperName := strings.ToUpper(name)
 	for _, indicator := range businessIndicators {
 		if strings.Contains(upperName, indicator) {
