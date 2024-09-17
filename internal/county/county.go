@@ -16,6 +16,7 @@ type Property struct {
     SQFT             float64 `json:"SQFT"`
     ZONE             string  `json:"ZONE"`
     TAX_CODES        string  `json:"TAX_CODES"`
+    YEAR_BUILT       string  `json:"YEAR_BUILT"`
     APPRAISED        float64 `json:"APPRAISED"`
     SALE_DATE        string  `json:"SALE_DATE"`
     SALE_PRICE       float64 `json:"SALE_PRICE"`

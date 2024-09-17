@@ -3,7 +3,6 @@ package county
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/gocolly/colly/v2"
 )
@@ -56,6 +55,7 @@ func getParcelInfo(c *colly.Collector, parcelID string) (Property, error) {
                 SQFT:             0, // Set to 0 if not available
                 ZONE:             attrs.ZONE,
                 TAX_CODES:        attrs.TAX_CODES,
+                YEAR_BUILT:       "", // Set to empty string if not available
                 APPRAISED:        0, // Set to 0 if not available
                 SALE_DATE:        "", // Set to empty string if not available
                 SALE_PRICE:       attrs.SALE_PRICE,
@@ -72,20 +72,6 @@ func getParcelInfo(c *colly.Collector, parcelID string) (Property, error) {
         return Property{}, err
     }
     return parcelInfo, err
-}
-func extractCityStateZip(address string) (string, string, string) {
-    parts := strings.Split(address, ",")
-    if len(parts) >= 2 {
-        stateZip := strings.TrimSpace(parts[len(parts)-1])
-        stateParts := strings.Fields(stateZip)
-        if len(stateParts) >= 2 {
-            return "", stateParts[0], stateParts[1]
-        }
-        if len(stateParts) == 1 {
-            return "", "NC", stateParts[0] // Assume NC if only ZIP is present
-        }
-    }
-    return "", "NC", "" // Default to NC if unable to parse
 }
 
 type Response struct {

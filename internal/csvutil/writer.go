@@ -42,6 +42,7 @@ func WriteParcelResults(filename string, parcels []county.Property) error {
             formatFloat(parcel.SQFT),
             parcel.ZONE,
             parcel.TAX_CODES,
+            parcel.YEAR_BUILT,
             formatFloat(parcel.APPRAISED),
             parcel.SALE_DATE,
             formatFloat(parcel.SALE_PRICE),

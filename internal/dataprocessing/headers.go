@@ -9,7 +9,7 @@ var HeadersConfig = struct {
     ParcelResults: []string{
         "ID", "PIN", "Owner", "Property Address", "Property City", "Property State",
         "Owner Address", "Owner City", "Owner State", "Acres", "Calculated Acres",
-        "SQFT", "Zone", "Tax Codes", "Appraised", "Sale Date", "Sale Price",
+        "SQFT", "Zone", "Tax Codes", "Year Built", "Appraised", "Sale Date", "Sale Price",
         "Township", "County",
     },
     SOSResults: []string{
@@ -18,7 +18,7 @@ var HeadersConfig = struct {
     UnifiedResults: []string{
         "ID", "PIN", "Owner", "Business Name", "Property Address", "Property City", "Property State",
         "Owner Address", "Owner City", "Owner State", "Acres", "Calculated Acres",
-        "SQFT", "Zone", "Tax Codes", "Appraised", "Sale Date", "Sale Price",
+        "SQFT", "Zone", "Tax Codes", "Year Built", "Appraised", "Sale Date", "Sale Price",
         "Township", "County", "Official Title", "Official Name",
     },
     Names: []string{

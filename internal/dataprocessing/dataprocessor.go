@@ -27,6 +27,7 @@ type UnifiedRecord struct {
     SQFT            string
     Zone            string
     TaxCodes        string
+    YearBuilt       string
     Appraised       string
     SaleDate        string
     SalePrice       string
@@ -94,11 +95,12 @@ func readParcelResults(filename string) ([]UnifiedRecord, error) {
             SQFT:            row[11],
             Zone:            row[12],
             TaxCodes:        row[13],
-            Appraised:       row[14],
-            SaleDate:        row[15],
-            SalePrice:       row[16],
-            Township:        row[17],
-            County:          row[18],
+            YearBuilt:       row[14],
+            Appraised:       row[15],
+            SaleDate:        row[16],
+            SalePrice:       row[17],
+            Township:        row[18],
+            County:          row[19],
             BusinessName:    "",
             Officials:       []string{},
         }
@@ -188,6 +190,7 @@ func writeUnifiedOutput(filename string, records []UnifiedRecord) error {
                 record.SQFT,
                 record.Zone,
                 record.TaxCodes,
+                record.YearBuilt,
                 record.Appraised,
                 record.SaleDate,
                 record.SalePrice,
@@ -276,90 +279,98 @@ func readCSV(filename string) ([][]string, error) {
 // }
 
 func extractName(s string) string {
-	s = strings.Trim(s, "\"")
+    s = strings.Trim(s, "\"")
+    s = strings.TrimSpace(s)
+    s = regexp.MustCompile(`\s+`).ReplaceAllString(s, " ") // Replace multiple spaces with single space
 
-	parts := strings.SplitN(s, ":", 2)
-	if len(parts) == 2 {
-		s = strings.TrimSpace(parts[1])
-	}
+    parts := strings.SplitN(s, ":", 2)
+    if len(parts) == 2 {
+        s = strings.TrimSpace(parts[1])
+    }
 
-	s = strings.Split(s, " TRUSTEE")[0]
-	s = strings.Split(s, " ET AL")[0]
+    s = strings.Split(s, " TRUSTEE")[0]
+    s = strings.Split(s, " ET AL")[0]
     s = strings.Split(s, " SUCCESSOR")[0]
+    s = strings.TrimSpace(s)
 
-	s = strings.TrimSpace(s)
+    re := regexp.MustCompile(`(?i)\s+(I{1,3}|IV|V|VI{1,3}|JR|SR)\.?$`)
+    suffix := re.FindString(s)
+    s = re.ReplaceAllString(s, "")
 
-	re := regexp.MustCompile(`(?i)\s+(I{1,3}|IV|V|VI{1,3}|JR|SR)\.?$`)
-	suffix := re.FindString(s)
-	s = re.ReplaceAllString(s, "")
+    nameParts := strings.Fields(s)
 
-	nameParts := strings.Fields(s)
-	if len(nameParts) > 0 && strings.Contains(nameParts[0], ",") {
-		lastName := strings.TrimRight(nameParts[0], ",")
-		firstName := strings.Join(nameParts[1:], " ")
-		s = firstName + " " + lastName
-	}
+    // Rearrange name if it's not a business name and has at least two parts
+    if !isBusinessName(s) && len(nameParts) >= 2 {
+        lastName := nameParts[0]
+        firstMiddleNames := nameParts[1:]
+        s = strings.Join(firstMiddleNames, " ") + " " + lastName
+    } else {
+        s = strings.Join(nameParts, " ")
+    }
 
-	unwantedSuffixes := []string{"CBE", "ET AL"}
-	for _, unwanted := range unwantedSuffixes {
-		s = strings.Replace(s, unwanted, "", -1)
-	}
+    s = strings.TrimSpace(s)
+    if suffix != "" {
+        s += " " + strings.TrimSpace(suffix)
+    }
 
-	s = strings.TrimSpace(s)
-	if suffix != "" {
-		s += " " + strings.TrimSpace(suffix)
-	}
+    caser := cases.Title(language.English)
+    s = caser.String(strings.ToLower(s))
 
-	caser := cases.Title(language.English)
-	s = caser.String(strings.ToLower(s))
+    // Capitalize suffixes like II, III, IV
+    re = regexp.MustCompile(`\b(Ii|Iii|Iv|Vi|Vii|Viii|Ix|X)\b`)
+    s = re.ReplaceAllStringFunc(s, strings.ToUpper)
 
-	re = regexp.MustCompile(`\b(Ii|Iii|Iv|Vi|Vii|Viii|Ix|X)\b`)
-	s = re.ReplaceAllStringFunc(s, strings.ToUpper)
-
-	return s
+    return s
 }
 
 func extractNameAndTitle(s string) (string, string) {
-	s = strings.Trim(s, "\"")
-	parts := strings.SplitN(s, ":", 2)
-	if len(parts) == 2 {
-		return strings.TrimSpace(parts[0]), cleanName(parts[1])
-	}
-	return "", cleanName(s)
+    s = strings.Trim(s, "\"")
+    parts := strings.SplitN(s, ":", 2)
+    if len(parts) == 2 {
+        return strings.TrimSpace(parts[0]), cleanName(parts[1])
+    }
+    return "", cleanName(s)
 }
 
+
 func cleanName(s string) string {
-	s = strings.Split(s, " TRUSTEE")[0]
-	s = strings.Split(s, " ET AL")[0]
-	s = strings.TrimSpace(s)
-    s = strings.TrimRight(s, ",")
+    s = strings.Trim(s, "\"")
+    s = strings.TrimSpace(s)
+    s = regexp.MustCompile(`\s+`).ReplaceAllString(s, " ") // Replace multiple spaces with single space
 
-	re := regexp.MustCompile(`(?i)\s+(I{1,3}|IV|V|VI{1,3}|JR|SR)\.?$`)
-	suffix := re.FindString(s)
-	s = re.ReplaceAllString(s, "")
+    s = strings.TrimRight(s, ",") // Remove trailing commas
 
-	nameParts := strings.Fields(s)
-	if len(nameParts) > 0 && strings.Contains(nameParts[0], ",") {
-		lastName := strings.TrimRight(nameParts[0], ",")
-		firstName := strings.Join(nameParts[1:], " ")
-		s = firstName + " " + lastName
-	}
+    s = strings.Split(s, " TRUSTEE")[0]
+    s = strings.Split(s, " ET AL")[0]
+    s = strings.Split(s, " SUCCESSOR")[0]
+    s = strings.TrimSpace(s)
 
-	unwantedSuffixes := []string{"CBE", "ET AL"}
-	for _, unwanted := range unwantedSuffixes {
-		s = strings.Replace(s, unwanted, "", -1)
-	}
+    re := regexp.MustCompile(`(?i)\s+(I{1,3}|IV|V|VI{1,3}|JR|SR)\.?$`)
+    suffix := re.FindString(s)
+    s = re.ReplaceAllString(s, "")
 
-	s = strings.TrimSpace(s)
-	if suffix != "" {
-		s += " " + strings.TrimSpace(suffix)
-	}
+    nameParts := strings.Fields(s)
 
-	caser := cases.Title(language.English)
-	s = caser.String(strings.ToLower(s))
+    // Only rearrange if first part contains a comma
+    if len(nameParts) > 0 && strings.Contains(nameParts[0], ",") {
+        lastName := strings.TrimRight(nameParts[0], ",")
+        firstNames := nameParts[1:]
+        s = strings.Join(firstNames, " ") + " " + lastName
+    } else {
+        s = strings.Join(nameParts, " ")
+    }
 
-	re = regexp.MustCompile(`\b(Ii|Iii|Iv|Vi|Vii|Viii|Ix|X)\b`)
-	s = re.ReplaceAllStringFunc(s, strings.ToUpper)
+    s = strings.TrimSpace(s)
+    if suffix != "" {
+        s += " " + strings.TrimSpace(suffix)
+    }
 
-	return s
+    caser := cases.Title(language.English)
+    s = caser.String(strings.ToLower(s))
+
+    // Capitalize suffixes like II, III, IV
+    re = regexp.MustCompile(`\b(Ii|Iii|Iv|Vi|Vii|Viii|Ix|X)\b`)
+    s = re.ReplaceAllStringFunc(s, strings.ToUpper)
+
+    return s
 }
