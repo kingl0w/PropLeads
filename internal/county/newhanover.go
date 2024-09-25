@@ -6,6 +6,7 @@ import (
 	"log"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/chromedp/cdproto/runtime"
@@ -33,39 +34,60 @@ func (nhs *NewHanoverScraper) Scrape(pids []string) ([]Property, error) {
         chromedp.WindowSize(1920, 1080),
     )
 
+    // Create an allocator context for the browser
     allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), opts...)
     defer cancelAlloc()
 
+    // Create a browser context with custom logger
+    browserCtx, cancelBrowser := chromedp.NewContext(allocCtx, chromedp.WithLogf(customLogger))
+    defer cancelBrowser()
+
     var properties []Property
+    var mu sync.Mutex
+    var wg sync.WaitGroup
+
+    // Limit the number of concurrent goroutines
+    sem := make(chan struct{}, 5) // Adjust the number as needed
 
     for _, pid := range pids {
-        ctx, cancelCtx := chromedp.NewContext(allocCtx, chromedp.WithLogf(customLogger))
-        defer cancelCtx()
+        wg.Add(1)
+        sem <- struct{}{}
 
-        // Set up JavaScript console logging
-        chromedp.ListenTarget(ctx, func(ev interface{}) {
-            if ev, ok := ev.(*runtime.EventConsoleAPICalled); ok {
-                for _, arg := range ev.Args {
-                    log.Printf("Console log: %v", arg)
+        go func(pid string) {
+            defer wg.Done()
+            defer func() { <-sem }()
+
+            // Create a new context for this tab with custom logger
+            tabCtx, cancelTab := chromedp.NewContext(browserCtx, chromedp.WithLogf(customLogger))
+            defer cancelTab()
+
+            // Set up JavaScript console logging for this tab
+            chromedp.ListenTarget(tabCtx, func(ev interface{}) {
+                if ev, ok := ev.(*runtime.EventConsoleAPICalled); ok {
+                    for _, arg := range ev.Args {
+                        log.Printf("Console log: %v", arg)
+                    }
                 }
+            })
+
+            var property Property
+            err := retry(3, 5*time.Second, func() error {
+                var err error
+                property, err = nhs.scrapePID(tabCtx, pid)
+                return err
+            })
+            if err != nil {
+                log.Printf("Failed to scrape PID %s after retries: %v", pid, err)
+                return
             }
-        })
 
-        var property Property
-        err := retry(3, 5*time.Second, func() error {
-            var err error
-            property, err = nhs.scrapePID(ctx, pid)
-            return err
-        })
-        if err != nil {
-            log.Printf("Failed to scrape PID %s after retries: %v", pid, err)
-            continue
-        }
-        properties = append(properties, property)
-
-        time.Sleep(5 * time.Second)
+            mu.Lock()
+            properties = append(properties, property)
+            mu.Unlock()
+        }(pid)
     }
 
+    wg.Wait()
     return properties, nil
 }
 
@@ -115,14 +137,11 @@ func (nhs *NewHanoverScraper) scrapePID(ctx context.Context, pid string) (Proper
 
 // handlePossibleDisclaimer handles the disclaimer popup
 func (nhs *NewHanoverScraper) handlePossibleDisclaimer() chromedp.ActionFunc {
-    // ... existing code ...
     return func(ctx context.Context) error {
         log.Println("Checking for disclaimer")
 
         var visible bool
-        err := chromedp.Run(ctx,
-            chromedp.Evaluate(`document.querySelector("#btAgree") !== null`, &visible),
-        )
+        err := chromedp.Evaluate(`document.querySelector("#btAgree") !== null`, &visible).Do(ctx)
         if err != nil {
             return fmt.Errorf("error checking for disclaimer: %w", err)
         }
@@ -141,15 +160,10 @@ func (nhs *NewHanoverScraper) handlePossibleDisclaimer() chromedp.ActionFunc {
 
 // searchAndClickResult searches for the PID and clicks the result
 func (nhs *NewHanoverScraper) searchAndClickResult(pid string) chromedp.ActionFunc {
-    // ... existing code ...
     return func(ctx context.Context) error {
-        // Create a context with a timeout of 60 seconds
-        timeoutCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-        defer cancel()
-
         log.Printf("Entering PID %s into search form", pid)
 
-        err := chromedp.Run(timeoutCtx,
+        err := chromedp.Run(ctx,
             chromedp.WaitVisible("#inpParid", chromedp.ByID),
             chromedp.Clear("#inpParid", chromedp.ByID),
             chromedp.SendKeys("#inpParid", pid, chromedp.ByID),
@@ -172,18 +186,21 @@ func (nhs *NewHanoverScraper) scrapeMainPage(property *Property) chromedp.Action
     return func(ctx context.Context) error {
         log.Printf("Scraping main page for PID %s", property.ALPHA)
 
-        timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-        defer cancel()
+        // Removed ownerAddress from the variable declarations
+        var owner, address, propertyCity, ownerCity, ownerState, ownerZip, acres, zone string
 
-        var owner, address, propertyCity, ownerCity, ownerState, acres, zone string
-
-        err := chromedp.Run(timeoutCtx,
+        err := chromedp.Run(ctx,
             chromedp.WaitVisible(`//*[@id="datalet_header_row"]/td/table/tbody/tr[3]/td[1]`, chromedp.BySearch),
             chromedp.Text(`//*[@id="datalet_header_row"]/td/table/tbody/tr[3]/td[1]`, &owner, chromedp.BySearch),
             chromedp.Text(`//*[@id="Parcel"]/tbody/tr[2]/td[2]`, &address, chromedp.BySearch),
             chromedp.Text(`//*[@id="Parcel"]/tbody/tr[4]/td[2]`, &propertyCity, chromedp.BySearch),
+
+            // **Removed extraction of ownerAddress**
+            // chromedp.Text(`//*[@id="Owners (On January1st)"]/tbody/tr[1]/td[2]`, &ownerAddress, chromedp.BySearch),
+
             chromedp.Text(`//*[@id="Owners (On January1st)"]/tbody/tr[2]/td[2]`, &ownerCity, chromedp.BySearch),
             chromedp.Text(`//*[@id="Owners (On January1st)"]/tbody/tr[3]/td[2]`, &ownerState, chromedp.BySearch),
+            chromedp.Text(`//*[@id="Owners (On January1st)"]/tbody/tr[4]/td[2]`, &ownerZip, chromedp.BySearch),
             chromedp.Text(`//*[@id="Parcel"]/tbody/tr[10]/td[2]`, &acres, chromedp.BySearch),
             chromedp.Text(`//*[@id="Parcel"]/tbody/tr[11]/td[2]`, &zone, chromedp.BySearch),
         )
@@ -191,15 +208,21 @@ func (nhs *NewHanoverScraper) scrapeMainPage(property *Property) chromedp.Action
             return fmt.Errorf("error scraping main page: %w", err)
         }
 
-        log.Printf("Extracted Data: Owner=%s, Address=%s, Property City=%s, Owner City=%s, Owner State=%s, Acres=%s, Zone=%s",
-            owner, address, propertyCity, ownerCity, ownerState, acres, zone)
+        // Updated log statement to remove ownerAddress
+        log.Printf("Extracted Data: Owner=%s, Address=%s, Property City=%s, Owner City=%s, Owner State=%s, Owner Zip=%s, Acres=%s, Zone=%s",
+            owner, address, propertyCity, ownerCity, ownerState, ownerZip, acres, zone)
 
         property.NAME = owner
         property.PROPERTY_ADDRESS = address
         property.PROPERTY_CITY = propertyCity
-        property.PROPERTY_STATE = "NC"     // Set the Property State to "NC"
+        property.PROPERTY_STATE = "NC" // Set the Property State to "NC"
+
+        // **Set OWNER_ADDRESS to blank**
+        property.OWNER_ADDRESS = ""    // Set Owner Address as blank
+
         property.OWNER_CITY = ownerCity
         property.OWNER_STATE = ownerState
+        property.OWNER_ZIP = ownerZip
         property.ZONE = zone
         property.ACRES = parseFloat(acres)
 
@@ -211,16 +234,12 @@ func (nhs *NewHanoverScraper) scrapeMainPage(property *Property) chromedp.Action
 
 // scrapeSalesPage scrapes data from the sales page
 func (nhs *NewHanoverScraper) scrapeSalesPage(property *Property) chromedp.ActionFunc {
-    // ... existing code ...
     return func(ctx context.Context) error {
         log.Printf("Scraping sales page for PID %s", property.ALPHA)
 
-        timeoutCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-        defer cancel()
-
         var saleDate, salePrice string
 
-        err := chromedp.Run(timeoutCtx,
+        err := chromedp.Run(ctx,
             chromedp.Click(`//*[@id="sidemenu"]/ul/li[2]/a/span`, chromedp.NodeVisible, chromedp.BySearch),
             chromedp.WaitVisible(`//*[@id="Sale Details"]`, chromedp.BySearch),
             chromedp.Text(`//*[@id="Sale Details"]/tbody/tr[1]/td[2]`, &saleDate, chromedp.BySearch),
@@ -244,16 +263,12 @@ func (nhs *NewHanoverScraper) scrapeSalesPage(property *Property) chromedp.Actio
 
 // scrapeCommercialPage scrapes data from the commercial page
 func (nhs *NewHanoverScraper) scrapeCommercialPage(property *Property) chromedp.ActionFunc {
-    // ... existing code ...
     return func(ctx context.Context) error {
         log.Printf("Scraping commercial page for PID %s", property.ALPHA)
 
-        timeoutCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-        defer cancel()
-
         var yearBuilt, sqft string
 
-        err := chromedp.Run(timeoutCtx,
+        err := chromedp.Run(ctx,
             chromedp.Click(`//*[@id="sidemenu"]/ul/li[4]/a/span`, chromedp.NodeVisible, chromedp.BySearch),
             chromedp.WaitVisible(`//*[@id="Commercial"]`, chromedp.BySearch),
             chromedp.Text(`//*[@id="Commercial"]/tbody/tr[6]/td[2]`, &yearBuilt, chromedp.BySearch),
@@ -277,16 +292,12 @@ func (nhs *NewHanoverScraper) scrapeCommercialPage(property *Property) chromedp.
 
 // scrapeValuesPage scrapes data from the values page
 func (nhs *NewHanoverScraper) scrapeValuesPage(property *Property) chromedp.ActionFunc {
-    // ... existing code ...
     return func(ctx context.Context) error {
         log.Printf("Scraping values page for PID %s", property.ALPHA)
 
-        timeoutCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-        defer cancel()
-
         var appraised string
 
-        err := chromedp.Run(timeoutCtx,
+        err := chromedp.Run(ctx,
             chromedp.Click(`//*[@id="sidemenu"]/ul/li[8]/a/span`, chromedp.NodeVisible, chromedp.BySearch),
             chromedp.WaitVisible(`//*[@id="Values"]`, chromedp.BySearch),
             chromedp.Text(`//*[@id="Values"]/tbody/tr[4]/td[2]`, &appraised, chromedp.BySearch),
@@ -335,3 +346,4 @@ func retry(attempts int, sleep time.Duration, f func() error) error {
     }
     return err
 }
+
