@@ -16,8 +16,6 @@ import (
 	"github.com/kingl0w/PropLeads/internal/sos"
 )
 
-    
-
 func main() {
     countyName := flag.String("county", "", "Name of the county to scrape")
     sosOnly := flag.Bool("sos-only", false, "Run only the SOS scrape")
@@ -58,8 +56,6 @@ func runReconciliation() {
 
     fmt.Println("Reconciliation complete. Final results file created:", outputPath)
 }
-
-
 
 func runDataProcessing() {
     parcelResultsFile := filepath.Join("data", "output", "parcel_results.csv")
@@ -131,7 +127,7 @@ func runCountyScrape(countyName string) {
 }
 
 func runSOSScrape() {
-    sos.VerboseLogging = false
+    sos.VerboseLogging = true // Enable verbose logging
 
     parcelResultsFile := filepath.Join("data", "output", "parcel_results.csv")
     sosResultsFile := filepath.Join("data", "output", "sos_results.csv")
@@ -205,22 +201,26 @@ func worker(id int, jobs <-chan string, results chan<- sos.BusinessInfo, wg *syn
         var info sos.BusinessInfo
         var err error
         for attempts := 0; attempts < 3; attempts++ {
-            if sos.VerboseLogging {
-                fmt.Printf("Worker %d looking up business: %s (Attempt %d)\n", id, businessName, attempts+1)
-            }
+            log.Printf("Worker %d attempting to look up business: %s (Attempt %d)", id, businessName, attempts+1)
             info, err = sos.LookupBusiness(businessName)
             if err == nil && len(info.CompanyOfficials) > 0 && info.CompanyOfficials[0].Name != "No match" {
+                log.Printf("Worker %d found officials for %s on attempt %d", id, businessName, attempts+1)
                 break
             }
+            if err != nil {
+                log.Printf("Worker %d encountered an error for %s on attempt %d: %v", id, businessName, attempts+1, err)
+            } else if len(info.CompanyOfficials) > 0 && info.CompanyOfficials[0].Name == "No match" {
+                log.Printf("Worker %d did not find officials for %s on attempt %d", id, businessName, attempts+1)
+            }
             if attempts < 2 {
-                delay := time.Duration(2000 + rand.Intn(3000)) * time.Millisecond
+                delay := time.Duration(2000+rand.Intn(3000)) * time.Millisecond
+                log.Printf("Worker %d will retry %s after %v", id, businessName, delay)
                 time.Sleep(delay)
+            } else {
+                log.Printf("Worker %d did not find officials for %s after %d attempts", id, businessName, attempts+1)
             }
         }
         if err != nil {
-            if sos.VerboseLogging {
-                log.Printf("Error looking up business %s: %v\n", businessName, err)
-            }
             info = sos.BusinessInfo{BusinessName: businessName, CompanyOfficials: []sos.Official{{Title: "Result", Name: "No match"}}}
         }
         results <- info
