@@ -84,6 +84,8 @@ func runCountyScrape(countyName string) {
         scraper = county.NewPenderScraper()
     case "newhanover":
         scraper = county.NewNewHanoverScraper()
+    case "brunswick":
+        scraper = county.NewBrunswickScraper()
     default:
         log.Fatalf("Unknown county: %s", countyName)
     }
