@@ -332,15 +332,18 @@ func extractNameAndTitle(s string) (string, string) {
 
 func cleanName(s string) string {
     s = strings.TrimSpace(s)
-    s = strings.Trim(s, "&") // Remove leading/trailing '&'
+    s = strings.Trim(s, "&")
     s = strings.TrimSpace(s)
-    s = regexp.MustCompile(`^\b(AND|ET|&)\b\s*`).ReplaceAllString(s, "")  // Remove leading 'AND', 'ET', '&'
-    s = regexp.MustCompile(`\s*\b(AND|ET|&)\b$`).ReplaceAllString(s, "")  // Remove trailing 'AND', 'ET', '&'
+    s = regexp.MustCompile(`^\b(AND|ET|&)\b\s*`).ReplaceAllString(s, "")
+    s = regexp.MustCompile(`\s*\b(AND|ET|&)\b$`).ReplaceAllString(s, "")
     s = strings.TrimSpace(s)
     s = regexp.MustCompile(`\s+`).ReplaceAllString(s, " ")
 
     // Remove unwanted substrings
-    unwantedSubstrings := []string{" TRUSTEE", " ET AL", " SUCCESSOR", " HRS", " HEIRS", " ESTATE", " ETALS", " ET", " C/O"}
+    unwantedSubstrings := []string{
+        " TRUSTEE", " ET AL", " SUCCESSOR", " HRS", " HEIRS", " ESTATE",
+        " ETALS", " ET", " C/O",
+    }
     for _, substr := range unwantedSubstrings {
         s = strings.Split(s, substr)[0]
     }
@@ -348,48 +351,48 @@ func cleanName(s string) string {
 
     // Remove trailing commas and periods
     s = strings.TrimRight(s, ",.")
-    
-    // Handle suffixes like Jr., Sr., III
-    reSuffix := regexp.MustCompile(`(?i)\s+(I{1,3}|IV|V|VI{1,3}|JR|SR)\.?$`)
+    s = strings.ReplaceAll(s, ",", "")
+    s = strings.ReplaceAll(s, ".", "")
+    s = strings.TrimSpace(s)
+
+    // Handle suffixes like Jr, Sr, III
+    reSuffix := regexp.MustCompile(`(?i)\b(JR|SR|I{2,3}|IV|V|VI{1,3}|IX|X)\b$`)
     suffix := reSuffix.FindString(s)
     s = reSuffix.ReplaceAllString(s, "")
-    
+    s = strings.TrimSpace(s)
+
     nameParts := strings.Fields(s)
 
-    // Manual corrections for known typos
-    corrections := map[string]string{
-        "Skippeer Morris Ray": "Skipper Morris Ray",
-    }
-    if correctedName, exists := corrections[s]; exists {
-        s = correctedName
+    // Remove any commas from name parts
+    for i, part := range nameParts {
+        nameParts[i] = strings.ReplaceAll(part, ",", "")
     }
 
-    // Rearrange name if it's not a business name and has at least two parts
+    // Rearrangement logic
     if !isBusinessName(s) && len(nameParts) >= 2 {
-        // Check for 'Last, First' format
-        if strings.Contains(nameParts[0], ",") {
-            lastName := strings.TrimRight(nameParts[0], ",")
-            firstNames := nameParts[1:]
-            s = strings.Join(firstNames, " ") + " " + lastName
-        } else {
-            // Assume 'First Middle Last' format
-            s = strings.Join(nameParts, " ")
+        if s == strings.ToUpper(s) {
+            // Name is in all uppercase letters, rearrange by moving first word to the end
+            nameParts = append(nameParts[1:], nameParts[0])
+        } else if len(nameParts) == 3 && len(nameParts[0]) == 1 {
+            // First part is an initial, rearrange accordingly
+            nameParts = append(nameParts[1:], nameParts[0])
         }
-    } else {
-        s = strings.Join(nameParts, " ")
+        // Else, assume the name is in correct order
     }
 
-    s = strings.TrimSpace(s)
+    s = strings.Join(nameParts, " ")
+
     if suffix != "" {
-        s += " " + strings.TrimSpace(suffix)
+        s += " " + strings.ToUpper(suffix)
     }
 
     // Capitalize name properly
     s = cases.Title(language.English).String(strings.ToLower(s))
 
-    // Capitalize suffixes like II, III, IV
-    reRoman := regexp.MustCompile(`\b(Ii|Iii|Iv|V|Vi|Vii|Viii|Ix|X)\b`)
-    s = reRoman.ReplaceAllStringFunc(s, strings.ToUpper)
+    // Capitalize suffixes like II, III, IV, JR, SR
+    reSuffixCapital := regexp.MustCompile(`\b(Ii|Iii|Iv|V|Vi{1,3}|Ix|X|Jr|Sr)\b`)
+    s = reSuffixCapital.ReplaceAllStringFunc(s, strings.ToUpper)
 
     return s
 }
+
