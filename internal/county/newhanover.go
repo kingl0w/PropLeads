@@ -1,313 +1,214 @@
 package county
 
 import (
-	"context"
+	"encoding/json"
 	"fmt"
 	"log"
-	"math/rand"
+	"strconv"
 	"strings"
-	"sync"
-	"time"
 
-	"github.com/chromedp/cdproto/runtime"
-	"github.com/chromedp/chromedp"
-	"github.com/chromedp/chromedp/kb"
-	"github.com/kingl0w/PropLeads/internal/scrapeutils"
+	"github.com/gocolly/colly/v2"
 )
 
 type NewHanoverScraper struct{}
 
 // NewNewHanoverScraper creates a new scraper instance
 func NewNewHanoverScraper() *NewHanoverScraper {
-    return &NewHanoverScraper{}
+	return &NewHanoverScraper{}
 }
 
-// Scrape method to scrape multiple PIDs
+// Scrape method to scrape multiple PIDs using the ArcGIS REST API
 func (nhs *NewHanoverScraper) Scrape(pids []string) ([]Property, error) {
-    opts := append(chromedp.DefaultExecAllocatorOptions[:],
-        chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64)"),
-        chromedp.Flag("ignore-certificate-errors", true),
-        chromedp.Flag("disable-web-security", true),
-        chromedp.NoSandbox,
-        chromedp.Flag("headless", true),
-        chromedp.Flag("enable-automation", false),
-        chromedp.Flag("disable-blink-features", "AutomationControlled"),
-        chromedp.WindowSize(1920, 1080),
-    )
+	var properties []Property
 
-    // Create an allocator context for the browser
-    allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(), opts...)
-    defer cancelAlloc()
+	for _, pid := range pids {
+		log.Printf("Fetching data for PID %s from ArcGIS REST API", pid)
+		// Create a new collector for each PID to avoid callback conflicts
+		c := colly.NewCollector()
+		info, err := nhs.getParcelInfo(c, pid)
+		if err != nil {
+			log.Printf("Error getting info for parcel %s: %v", pid, err)
+			continue
+		}
+		properties = append(properties, info)
+		log.Printf("Successfully retrieved data for PID %s", pid)
+	}
 
-    // Create a browser context with custom logger
-    browserCtx, cancelBrowser := chromedp.NewContext(allocCtx, chromedp.WithLogf(scrapeutils.CustomLogger))
-    defer cancelBrowser()
-
-    var properties []Property
-    var mu sync.Mutex
-    var wg sync.WaitGroup
-
-    // Limit the number of concurrent goroutines
-    concurrencyLimit := 5 // Adjust the number as needed
-    sem := make(chan struct{}, concurrencyLimit)
-
-    for _, pid := range pids {
-        wg.Add(1)
-        sem <- struct{}{}
-
-        go func(pid string) {
-            defer wg.Done()
-            defer func() { <-sem }()
-
-            // Create a new context for this tab with custom logger
-            tabCtx, cancelTab := chromedp.NewContext(browserCtx, chromedp.WithLogf(scrapeutils.CustomLogger))
-            defer cancelTab()
-
-            // Set up JavaScript console logging for this tab
-            chromedp.ListenTarget(tabCtx, func(ev interface{}) {
-                if ev, ok := ev.(*runtime.EventConsoleAPICalled); ok {
-                    for _, arg := range ev.Args {
-                        log.Printf("Console log: %v", arg)
-                    }
-                }
-            })
-
-            var property Property
-            maxAttempts := 3
-            for attempt := 1; attempt <= maxAttempts; attempt++ {
-                log.Printf("Attempting to scrape PID %s (Attempt %d)", pid, attempt)
-
-                err := nhs.scrapePID(tabCtx, pid, &property)
-                if err == nil {
-                    log.Printf("Successfully scraped PID %s on attempt %d", pid, attempt)
-                    mu.Lock()
-                    properties = append(properties, property)
-                    mu.Unlock()
-                    break
-                }
-
-                log.Printf("Error scraping PID %s on attempt %d: %v", pid, attempt, err)
-                if attempt < maxAttempts {
-                    delay := time.Duration(2000+rand.Intn(3000)) * time.Millisecond
-                    log.Printf("Retrying PID %s after %v", pid, delay)
-                    time.Sleep(delay)
-                } else {
-                    log.Printf("Failed to scrape PID %s after %d attempts: %v", pid, maxAttempts, err)
-                }
-            }
-        }(pid)
-    }
-
-    wg.Wait()
-    return properties, nil
+	return properties, nil
 }
 
-// scrapePID scrapes data for a single PID
-func (nhs *NewHanoverScraper) scrapePID(ctx context.Context, pid string, property *Property) error {
-    pid = strings.TrimSpace(pid) // Trim whitespace from PID
+// getParcelInfo retrieves parcel information from the New Hanover County ArcGIS REST API
+func (nhs *NewHanoverScraper) getParcelInfo(c *colly.Collector, pid string) (Property, error) {
+	// New Hanover County PropertyOwners FeatureServer endpoint
+	baseURL := "https://gisport.nhcgov.com/server/rest/services/Layers/PropertyOwners/FeatureServer/0/query"
+	pid = strings.TrimSpace(pid)
 
-    property.ALPHA = pid
-    property.PIN = pid // Set the PIN field to PID
-    property.COUNTY = "New Hanover"
+	var parcelInfo Property
+	var err error
 
-    log.Printf("Starting scrape for PID %s", pid)
+	c.OnResponse(func(r *colly.Response) {
+		// First unmarshal into a flexible structure
+		var rawResponse map[string]interface{}
+		if unmarshalErr := json.Unmarshal(r.Body, &rawResponse); unmarshalErr != nil {
+			err = fmt.Errorf("error parsing JSON for PID %s: %v", pid, unmarshalErr)
+			log.Print(err)
+			return
+		}
 
-    // Create a new context with a timeout for each scrape attempt
-    timeoutCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-    defer cancel()
+		features, ok := rawResponse["features"].([]interface{})
+		if !ok || len(features) == 0 {
+			err = fmt.Errorf("no data found for parcel ID %s", pid)
+			return
+		}
 
-    err := chromedp.Run(timeoutCtx,
-        chromedp.Navigate("https://etax.nhcgov.com/pt/search/commonsearch.aspx?mode=parid"),
-        chromedp.ActionFunc(func(ctx context.Context) error {
-            log.Printf("Navigated to search page for PID %s", pid)
-            return nil
-        }),
-        nhs.handlePossibleDisclaimer(),
-        nhs.searchAndClickResult(pid),
-        nhs.scrapeMainPage(property),
-        nhs.scrapeSalesPage(property),
-        nhs.scrapeCommercialPage(property),
-        nhs.scrapeValuesPage(property),
-    )
+		feature := features[0].(map[string]interface{})
+		attrs := feature["attributes"].(map[string]interface{})
 
-    if err != nil {
-        return fmt.Errorf("error scraping PID %s: %v", pid, err)
-    }
+		// Helper function to safely get string values
+		getString := func(key string) string {
+			if val, ok := attrs[key]; ok && val != nil {
+				return fmt.Sprintf("%v", val)
+			}
+			return ""
+		}
 
-    log.Printf("Successfully scraped PID %s", pid)
-    return nil
+		// Helper function to safely get float values
+		getFloat := func(key string) float64 {
+			if val, ok := attrs[key]; ok && val != nil {
+				switch v := val.(type) {
+				case float64:
+					return v
+				case string:
+					f, _ := strconv.ParseFloat(v, 64)
+					return f
+				case int:
+					return float64(v)
+				}
+			}
+			return 0
+		}
+
+		// Helper function to safely get int values
+		getInt := func(key string) int {
+			if val, ok := attrs[key]; ok && val != nil {
+				switch v := val.(type) {
+				case float64:
+					return int(v)
+				case int:
+					return v
+				case string:
+					i, _ := strconv.Atoi(v)
+					return i
+				}
+			}
+			return 0
+		}
+
+		// Build property address from components
+		propertyAddress := ""
+		adrno := getInt("ADRNO")
+		if adrno > 0 {
+			propertyAddress = strconv.Itoa(adrno)
+		}
+		if adradd := getString("ADRADD"); adradd != "" {
+			propertyAddress += " " + strings.TrimSpace(adradd)
+		}
+		if adrdir := getString("ADRDIR"); adrdir != "" {
+			propertyAddress += " " + strings.TrimSpace(adrdir)
+		}
+		if adrstr := getString("ADRSTR"); adrstr != "" {
+			propertyAddress += " " + strings.TrimSpace(adrstr)
+		}
+		if adrsuf := getString("ADRSUF"); adrsuf != "" {
+			propertyAddress += " " + strings.TrimSpace(adrsuf)
+		}
+		if unitno := getString("UNITNO"); unitno != "" {
+			propertyAddress += " " + strings.TrimSpace(unitno)
+		}
+		propertyAddress = strings.TrimSpace(propertyAddress)
+
+		// Build owner address from components
+		ownerAddr1 := strings.TrimSpace(getString("OWNER_ADDR1"))
+		ownerAddr2 := strings.TrimSpace(getString("OWNER_ADDR2"))
+		ownerAddress := ownerAddr1
+		if ownerAddr2 != "" && ownerAddress != "" {
+			ownerAddress += ", " + ownerAddr2
+		} else if ownerAddr2 != "" {
+			ownerAddress = ownerAddr2
+		}
+
+		parcelInfo = Property{
+			ALPHA:            pid,
+			PIN:              getString("PARID"),
+			NAME:             strings.TrimSpace(getString("OWN1")),
+			PROPERTY_ADDRESS: propertyAddress,
+			PROPERTY_CITY:    strings.TrimSpace(getString("CITYNAME")),
+			PROPERTY_STATE:   "NC",
+			OWNER_ADDRESS:    ownerAddress,
+			OWNER_CITY:       strings.TrimSpace(getString("OWNER_CITY")),
+			OWNER_STATE:      strings.TrimSpace(getString("OWNER_STATE")),
+			OWNER_ZIP:        strings.TrimSpace(getString("OWNER_ZIP")),
+			ACRES:            getFloat("ACRES"),
+			CALCACRES:        0, // Not available in this API
+			SQFT:             getFloat("SFLA"),
+			ZONE:             strings.TrimSpace(getString("ZONING")),
+			TAX_CODES:        "", // Not directly available
+			YEAR_BUILT:       "", // Not available in PropertyOwners layer
+			APPRAISED:        getFloat("APRTOT"),
+			SALE_DATE:        strings.TrimSpace(getString("SALE_DATE")),
+			SALE_PRICE:       getFloat("SALE_PRICE"),
+			TOWNSHIP:         "", // Not available
+			COUNTY:           "New Hanover",
+		}
+
+		log.Printf("Parsed data for PID %s: Owner=%s, Address=%s, City=%s, Acres=%.2f, Zone=%s",
+			pid, parcelInfo.NAME, parcelInfo.PROPERTY_ADDRESS, parcelInfo.PROPERTY_CITY,
+			parcelInfo.ACRES, parcelInfo.ZONE)
+	})
+
+	c.OnError(func(r *colly.Response, e error) {
+		err = fmt.Errorf("request failed for PID %s: %v", pid, e)
+	})
+
+	// Query by PID field - the API uses PARID field
+	url := fmt.Sprintf("%s?f=json&where=PARID='%s'&returnGeometry=false&outFields=*", baseURL, pid)
+	log.Printf("Querying: %s", url)
+
+	err = c.Visit(url)
+	if err != nil {
+		return Property{}, fmt.Errorf("failed to visit URL for PID %s: %v", pid, err)
+	}
+
+	return parcelInfo, err
 }
 
-// handlePossibleDisclaimer handles the disclaimer popup
-func (nhs *NewHanoverScraper) handlePossibleDisclaimer() chromedp.ActionFunc {
-    return func(ctx context.Context) error {
-        log.Println("Checking for disclaimer")
-
-        var visible bool
-        err := chromedp.Evaluate(`document.querySelector("#btAgree") !== null`, &visible).Do(ctx)
-        if err != nil {
-            return fmt.Errorf("error checking for disclaimer: %w", err)
-        }
-
-        if visible {
-            log.Println("Disclaimer found; clicking agree")
-            return chromedp.Run(ctx,
-                chromedp.Click("#btAgree", chromedp.ByID),
-                chromedp.Sleep(1*time.Second),
-                chromedp.WaitNotPresent("#btAgree", chromedp.ByID),
-            )
-        }
-        log.Println("No disclaimer present")
-        return nil
-    }
-}
-
-// searchAndClickResult searches for the PID and clicks the result
-func (nhs *NewHanoverScraper) searchAndClickResult(pid string) chromedp.ActionFunc {
-    return func(ctx context.Context) error {
-        log.Printf("Entering PID %s into search form", pid)
-
-        err := chromedp.Run(ctx,
-            chromedp.WaitVisible("#inpParid", chromedp.ByID),
-            chromedp.Clear("#inpParid", chromedp.ByID),
-            chromedp.SendKeys("#inpParid", pid, chromedp.ByID),
-            chromedp.SendKeys("#inpParid", kb.Enter),
-            scrapeutils.WaitVisibleWithTimeout(".SearchResults", chromedp.ByQuery, scrapeutils.ElementWaitTimeout),
-            chromedp.Click(".SearchResults", chromedp.ByQuery),
-            scrapeutils.WaitVisibleWithTimeout("#datalet_div_3", chromedp.ByID, scrapeutils.ElementWaitTimeout),
-        )
-        if err != nil {
-            return fmt.Errorf("error searching and clicking result: %w", err)
-        }
-
-        log.Printf("Clicked search result for PID %s", pid)
-        return nil
-    }
-}
-
-// scrapeMainPage scrapes data from the main page
-func (nhs *NewHanoverScraper) scrapeMainPage(property *Property) chromedp.ActionFunc {
-    return func(ctx context.Context) error {
-        log.Printf("Scraping main page for PID %s", property.ALPHA)
-
-        var owner, address, propertyCity, ownerCity, ownerState, ownerZip, acres, zone string
-
-        err := chromedp.Run(ctx,
-            scrapeutils.WaitVisibleWithTimeout(`//*[@id="datalet_header_row"]/td/table/tbody/tr[3]/td[1]`, chromedp.BySearch, scrapeutils.ElementWaitTimeout),
-            chromedp.Text(`//*[@id="datalet_header_row"]/td/table/tbody/tr[3]/td[1]`, &owner, chromedp.BySearch),
-            chromedp.Text(`//*[@id="Parcel"]/tbody/tr[2]/td[2]`, &address, chromedp.BySearch),
-            chromedp.Text(`//*[@id="Parcel"]/tbody/tr[4]/td[2]`, &propertyCity, chromedp.BySearch),
-            chromedp.Text(`//*[@id="Owners (On January1st)"]/tbody/tr[2]/td[2]`, &ownerCity, chromedp.BySearch),
-            chromedp.Text(`//*[@id="Owners (On January1st)"]/tbody/tr[3]/td[2]`, &ownerState, chromedp.BySearch),
-            chromedp.Text(`//*[@id="Owners (On January1st)"]/tbody/tr[4]/td[2]`, &ownerZip, chromedp.BySearch),
-            chromedp.Text(`//*[@id="Parcel"]/tbody/tr[10]/td[2]`, &acres, chromedp.BySearch),
-            chromedp.Text(`//*[@id="Parcel"]/tbody/tr[11]/td[2]`, &zone, chromedp.BySearch),
-        )
-        if err != nil {
-            return fmt.Errorf("error scraping main page: %w", err)
-        }
-
-        log.Printf("Extracted Data: Owner=%s, Address=%s, Property City=%s, Owner City=%s, Owner State=%s, Owner Zip=%s, Acres=%s, Zone=%s",
-            owner, address, propertyCity, ownerCity, ownerState, ownerZip, acres, zone)
-
-        property.NAME = strings.TrimSpace(owner)
-        property.PROPERTY_ADDRESS = strings.TrimSpace(address)
-        property.PROPERTY_CITY = strings.TrimSpace(propertyCity)
-        property.PROPERTY_STATE = "NC" // Set the Property State to "NC"
-
-        property.OWNER_ADDRESS = "" // Set Owner Address as blank
-        property.OWNER_CITY = strings.TrimSpace(ownerCity)
-        property.OWNER_STATE = strings.TrimSpace(ownerState)
-        property.OWNER_ZIP = strings.TrimSpace(ownerZip)
-        property.ZONE = strings.TrimSpace(zone)
-        property.ACRES = scrapeutils.ParseFloat(acres)
-
-        log.Printf("Successfully scraped main page for PID %s", property.ALPHA)
-
-        return nil
-    }
-}
-
-// scrapeSalesPage scrapes data from the sales page
-func (nhs *NewHanoverScraper) scrapeSalesPage(property *Property) chromedp.ActionFunc {
-    return func(ctx context.Context) error {
-        log.Printf("Scraping sales page for PID %s", property.ALPHA)
-
-        var saleDate, salePrice string
-
-        err := chromedp.Run(ctx,
-            chromedp.Click(`//*[@id="sidemenu"]/ul/li[2]/a/span`, chromedp.NodeVisible, chromedp.BySearch),
-            scrapeutils.WaitVisibleWithTimeout(`//*[@id="Sale Details"]`, chromedp.BySearch, scrapeutils.ElementWaitTimeout),
-            chromedp.Text(`//*[@id="Sale Details"]/tbody/tr[1]/td[2]`, &saleDate, chromedp.BySearch),
-            chromedp.Text(`//*[@id="Sale Details"]/tbody/tr[3]/td[2]`, &salePrice, chromedp.BySearch),
-        )
-        if err != nil {
-            log.Printf("Sales data not found for PID %s: %v", property.ALPHA, err)
-            // Continue without sales data
-            return nil
-        }
-
-        log.Printf("Extracted Sales Data: Sale Date=%s, Sale Price=%s", saleDate, salePrice)
-
-        property.SALE_DATE = strings.TrimSpace(saleDate)
-        property.SALE_PRICE = scrapeutils.ParseFloat(salePrice)
-
-        log.Printf("Successfully scraped sales page for PID %s", property.ALPHA)
-        return nil
-    }
-}
-
-// scrapeCommercialPage scrapes data from the commercial page
-func (nhs *NewHanoverScraper) scrapeCommercialPage(property *Property) chromedp.ActionFunc {
-    return func(ctx context.Context) error {
-        log.Printf("Scraping commercial page for PID %s", property.ALPHA)
-
-        var yearBuilt, sqft string
-
-        err := chromedp.Run(ctx,
-            chromedp.Click(`//*[@id="sidemenu"]/ul/li[4]/a/span`, chromedp.NodeVisible, chromedp.BySearch),
-            scrapeutils.WaitVisibleWithTimeout(`//*[@id="Commercial"]`, chromedp.BySearch, scrapeutils.ElementWaitTimeout),
-            chromedp.Text(`//*[@id="Commercial"]/tbody/tr[6]/td[2]`, &yearBuilt, chromedp.BySearch),
-            chromedp.Text(`//*[@id="Commercial"]/tbody/tr[12]/td[2]`, &sqft, chromedp.BySearch),
-        )
-        if err != nil {
-            log.Printf("Commercial data not found for PID %s: %v", property.ALPHA, err)
-            // Continue without commercial data
-            return nil
-        }
-
-        log.Printf("Extracted Commercial Data: Year Built=%s, SQFT=%s", yearBuilt, sqft)
-
-        property.YEAR_BUILT = strings.TrimSpace(yearBuilt)
-        property.SQFT = scrapeutils.ParseFloat(sqft)
-
-        log.Printf("Successfully scraped commercial page for PID %s", property.ALPHA)
-        return nil
-    }
-}
-
-// scrapeValuesPage scrapes data from the values page
-func (nhs *NewHanoverScraper) scrapeValuesPage(property *Property) chromedp.ActionFunc {
-    return func(ctx context.Context) error {
-        log.Printf("Scraping values page for PID %s", property.ALPHA)
-
-        var appraised string
-
-        err := chromedp.Run(ctx,
-            chromedp.Click(`//*[@id="sidemenu"]/ul/li[8]/a/span`, chromedp.NodeVisible, chromedp.BySearch),
-            scrapeutils.WaitVisibleWithTimeout(`//*[@id="Values"]`, chromedp.BySearch, scrapeutils.ElementWaitTimeout),
-            chromedp.Text(`//*[@id="Values"]/tbody/tr[4]/td[2]`, &appraised, chromedp.BySearch),
-        )
-        if err != nil {
-            log.Printf("Values data not found for PID %s: %v", property.ALPHA, err)
-            return nil
-        }
-
-        log.Printf("Extracted Values Data: Appraised=%s", appraised)
-
-        property.APPRAISED = scrapeutils.ParseFloat(appraised)
-
-        log.Printf("Successfully scraped values page for PID %s", property.ALPHA)
-        return nil
-    }
+// NewHanoverResponse represents the API response structure
+type NewHanoverResponse struct {
+	Features []struct {
+		Attributes struct {
+			PARID        string  `json:"PARID"`
+			OWN1         string  `json:"OWN1"`
+			OWNER_ADDR1  string  `json:"OWNER_ADDR1"`
+			OWNER_ADDR2  string  `json:"OWNER_ADDR2"`
+			OWNER_CITY   string  `json:"OWNER_CITY"`
+			OWNER_STATE  string  `json:"OWNER_STATE"`
+			OWNER_ZIP    string  `json:"OWNER_ZIP"`
+			ADRNO        int     `json:"ADRNO"`
+			ADRADD       string  `json:"ADRADD"`
+			UNITNO       string  `json:"UNITNO"`
+			ADRSTR       string  `json:"ADRSTR"`
+			ADRSUF       string  `json:"ADRSUF"`
+			ADRDIR       string  `json:"ADRDIR"`
+			CITYNAME     string  `json:"CITYNAME"`
+			ACRES        float64 `json:"ACRES"`
+			ZONING       string  `json:"ZONING"`
+			APRLAND      float64 `json:"APRLAND"`
+			APRBLDG      float64 `json:"APRBLDG"`
+			APRTOT       float64 `json:"APRTOT"`
+			SALE_DATE    string  `json:"SALE_DATE"`
+			SALE_PRICE   float64 `json:"SALE_PRICE"`
+			SFLA         float64 `json:"SFLA"`
+			AREASUM      float64 `json:"AREASUM"`
+		} `json:"attributes"`
+	} `json:"features"`
 }
