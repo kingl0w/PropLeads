@@ -1,0 +1,33 @@
+# Git
+.git
+.gitignore
+
+# Dependencies
+node_modules
+propleads-connect/node_modules
+propleads-connect/dist
+
+# Build artifacts
+server
+scraper
+*.exe
+
+# Data (will be mounted as volume)
+data/propleads.db
+
+# IDE
+.vscode
+.idea
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local

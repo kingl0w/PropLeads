@@ -1,0 +1,84 @@
+# Backend Dockerfile for PropLeads Go API + Python scrapers
+FROM golang:1.24-bookworm AS builder
+
+# Install Python and dependencies
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    python3-venv \
+    wget \
+    gnupg \
+    xvfb \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Google Chrome
+RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
+    && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list \
+    && apt-get update \
+    && apt-get install -y google-chrome-stable \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Copy go mod files
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Install Python dependencies
+RUN pip3 install --no-cache-dir seleniumbase botasaurus --break-system-packages
+
+# Build Go binaries
+RUN CGO_ENABLED=1 GOOS=linux go build -o /app/server cmd/server/main.go
+RUN CGO_ENABLED=1 GOOS=linux go build -o /app/scraper cmd/scraper/main.go
+
+# Final stage - smaller image
+FROM debian:bookworm-slim
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    ca-certificates \
+    xvfb \
+    wget \
+    gnupg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Google Chrome
+RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
+    && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list \
+    && apt-get update \
+    && apt-get install -y google-chrome-stable \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy binaries from builder
+COPY --from=builder /app/server /app/server
+COPY --from=builder /app/scraper /app/scraper
+
+# Copy Python scrapers and internal packages
+COPY sos_scraper_seleniumbase.py /app/
+COPY sos_scraper_botasaurus.py /app/
+COPY internal /app/internal
+
+# Install Python dependencies in final image
+RUN pip3 install --no-cache-dir seleniumbase botasaurus --break-system-packages
+
+# Create data directories
+RUN mkdir -p /app/data/input /app/data/output
+
+# Expose API port
+EXPOSE 8080
+
+# Set environment variables
+ENV JWT_SECRET="change-this-in-production-super-secret-key-2024"
+ENV DISPLAY=:99
+
+# Start Xvfb and server
+CMD Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 & \
+    exec /app/server
