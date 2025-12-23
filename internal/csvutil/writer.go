@@ -81,6 +81,7 @@ func WriteSOSResults(filename string, businesses []sos.BusinessInfo) error {
             row := []string{
                 business.BusinessName,
                 "No match",
+                "",
             }
             if err := writer.Write(row); err != nil {
                 return err
@@ -92,6 +93,7 @@ func WriteSOSResults(filename string, businesses []sos.BusinessInfo) error {
                 row := []string{
                     business.BusinessName,
                     officialInfo,
+                    official.City,
                 }
                 if err := writer.Write(row); err != nil {
                     return err

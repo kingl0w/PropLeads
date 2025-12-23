@@ -59,6 +59,13 @@ func ProcessData(parcelFile, sosFile, unifiedOutputFile, namesOutputFile string)
         return fmt.Errorf("error writing names file: %v", err)
     }
 
+    // Also write WhitePages-formatted CSV
+    wpOutputFile := strings.Replace(namesOutputFile, "names.csv", "names_for_whitepages.csv", 1)
+    err = writeWhitePagesFormat(wpOutputFile, mergedRecords)
+    if err != nil {
+        return fmt.Errorf("error writing WhitePages format file: %v", err)
+    }
+
     return nil
 }
 
@@ -265,6 +272,75 @@ func writeNamesFile(filename string, records []UnifiedRecord) error {
         }
     }
     return nil
+}
+
+// writeWhitePagesFormat writes names in WhitePages upload format:
+// FirstName,LastName,City,State with NO HEADER
+func writeWhitePagesFormat(filename string, records []UnifiedRecord) error {
+    file, err := os.Create(filename)
+    if err != nil {
+        return err
+    }
+    defer file.Close()
+
+    writer := csv.NewWriter(file)
+    writer.Comma = ','
+    defer writer.Flush()
+
+    // NO HEADER - WhitePages requires no header row
+
+    // Write data
+    uniqueNames := make(map[string]struct{})
+    for _, record := range records {
+        for _, official := range record.Officials {
+            _, name := extractNameAndTitle(official)
+            name = strings.TrimRight(name, ",") // Remove trailing comma
+            if name != "" && !strings.Contains(strings.ToLower(name), "no match") && !strings.Contains(strings.ToLower(name), "no officials found") && !isBusinessName(name) {
+                key := fmt.Sprintf("%s,%s,%s", name, record.OwnerCity, record.OwnerState)
+                if _, exists := uniqueNames[key]; !exists {
+                    uniqueNames[key] = struct{}{}
+
+                    // Split name into first and last
+                    firstName, lastName := splitName(name)
+
+                    if err := writer.Write([]string{firstName, lastName, record.OwnerCity, record.OwnerState}); err != nil {
+                        return err
+                    }
+                }
+            }
+        }
+    }
+    return nil
+}
+
+// splitName splits a full name into first and last name
+// NC property records use "Last First Middle" format
+func splitName(fullName string) (string, string) {
+    fullName = strings.TrimSpace(fullName)
+
+    // Handle empty name
+    if fullName == "" {
+        return "", ""
+    }
+
+    // Split by spaces
+    parts := strings.Fields(fullName)
+
+    if len(parts) == 0 {
+        return "", ""
+    } else if len(parts) == 1 {
+        // Only one word - treat as last name
+        return "", parts[0]
+    } else if len(parts) == 2 {
+        // Two words - Last First
+        return parts[1], parts[0]
+    } else {
+        // Three+ words - Last First Middle...
+        // Last name is first word, everything else is first/middle name
+        lastName := parts[0]
+        firstName := strings.Join(parts[1:], " ")
+        return firstName, lastName
+    }
 }
 
 func isBusinessName(name string) bool {

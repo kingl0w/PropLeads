@@ -4,10 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"math/rand"
 	"path/filepath"
-	"sync"
-	"time"
 
 	"github.com/kingl0w/PropLeads/internal/county"
 	csv "github.com/kingl0w/PropLeads/internal/csvutil"
@@ -21,6 +18,7 @@ func main() {
     sosOnly := flag.Bool("sos-only", false, "Run only the SOS scrape")
     processOnly := flag.Bool("process-only", false, "Run only the data processing step")
     reconcileOnly := flag.Bool("reconcile-only", false, "Run only the data reconciliation step")
+    workers := flag.Int("workers", 0, "Number of concurrent workers for SOS scraping (0 = auto-scale, default)")
 
     flag.Parse()
 
@@ -29,9 +27,9 @@ func main() {
     } else if *processOnly {
         runDataProcessing()
     } else if *sosOnly {
-        runSOSScrape()
+        runSOSScrape(*workers)
     } else {
-        runCountyScrape(*countyName)
+        runCountyScrape(*countyName, *workers)
     }
 }
 
@@ -62,6 +60,7 @@ func runDataProcessing() {
     sosResultsFile := filepath.Join("data", "output", "sos_results.csv")
     unifiedResultsFile := filepath.Join("data", "output", "unified_results.csv")
     namesFile := filepath.Join("data", "output", "names.csv")
+    wpNamesFile := filepath.Join("data", "output", "names_for_whitepages.csv")
 
     err := dataprocessing.ProcessData(parcelResultsFile, sosResultsFile, unifiedResultsFile, namesFile)
     if err != nil {
@@ -70,9 +69,11 @@ func runDataProcessing() {
 
     fmt.Println("Processing complete. Unified results file created:", unifiedResultsFile)
     fmt.Println("Names file created:", namesFile)
+    fmt.Println("WhitePages upload file created:", wpNamesFile)
+    fmt.Println("\nNext step: Upload", wpNamesFile, "to WhitePages to get contact info")
 }
 
-func runCountyScrape(countyName string) {
+func runCountyScrape(countyName string, workers int) {
     pids, err := csv.ReadPIDs("data/input/pids.csv")
     if err != nil {
         log.Fatalf("Failed to read PIDs: %v", err)
@@ -125,11 +126,11 @@ func runCountyScrape(countyName string) {
     }
 
     // Run SOS scrape after county scrape
-    runSOSScrape()
+    runSOSScrape(workers)
 }
 
-func runSOSScrape() {
-    sos.VerboseLogging = true // Enable verbose logging
+func runSOSScrape(workers int) {
+    fmt.Println("\n=== Starting SOS Scrape ===")
 
     parcelResultsFile := filepath.Join("data", "output", "parcel_results.csv")
     sosResultsFile := filepath.Join("data", "output", "sos_results.csv")
@@ -153,78 +154,94 @@ func runSOSScrape() {
         }
     }
 
-    jobs := make(chan string, len(uniqueBusinesses))
-    results := make(chan sos.BusinessInfo, len(uniqueBusinesses))
+    fmt.Printf("Found %d unique businesses to look up\n", len(uniqueBusinesses))
 
-    // Start worker goroutines
-    numWorkers := 5
-    var wg sync.WaitGroup
-    for w := 1; w <= numWorkers; w++ {
-        wg.Add(1)
-        go worker(w, jobs, results, &wg)
+    // Convert map to slice for easier processing
+    businessNames := make([]string, 0, len(uniqueBusinesses))
+    for name := range uniqueBusinesses {
+        businessNames = append(businessNames, name)
     }
 
-    // Send jobs to the worker pool
-    for businessName := range uniqueBusinesses {
-        jobs <- businessName
-    }
-    close(jobs)
+    // Determine worker count (auto-scale if workers == 0)
+    numWorkers := determineWorkers(workers, len(businessNames))
+    fmt.Printf("Using %d concurrent workers\n", numWorkers)
 
-    // Start a goroutine to close results channel when all workers are done
-    go func() {
-        wg.Wait()
-        close(results)
-    }()
+    // Process businesses concurrently
+    businessInfos := processConcurrent(businessNames, numWorkers)
 
-    // Collect results
-    var businessInfos []sos.BusinessInfo
-    for info := range results {
-        businessInfos = append(businessInfos, info)
-        if len(info.CompanyOfficials) == 0 || (len(info.CompanyOfficials) == 1 && info.CompanyOfficials[0].Name == "No match") {
-            log.Printf("0 officials found for %s", info.BusinessName)
-        } else {
-            log.Printf("Found %d officials for %s", len(info.CompanyOfficials), info.BusinessName)
-            for i, official := range info.CompanyOfficials {
-                log.Printf("  Official %d: %s - %s", i+1, official.Title, official.Name)
-            }
-        }
-    }
-
+    // Write results
     err = csv.WriteSOSResults(sosResultsFile, businessInfos)
     if err != nil {
         log.Fatalf("Failed to write SOS results: %v", err)
     }
-    fmt.Printf("SOS results written to %s\n", sosResultsFile)
+    fmt.Printf("\nSOS results written to %s\n", sosResultsFile)
 }
 
-func worker(id int, jobs <-chan string, results chan<- sos.BusinessInfo, wg *sync.WaitGroup) {
-    defer wg.Done()
+func determineWorkers(userWorkers int, numBusinesses int) int {
+    // If user specified workers, use that
+    if userWorkers > 0 {
+        return userWorkers
+    }
+
+    // Auto-scale based on number of businesses
+    switch {
+    case numBusinesses < 10:
+        return 3 // Small batch: conservative
+    case numBusinesses < 50:
+        return 5 // Medium batch: default
+    case numBusinesses < 100:
+        return 5 // Still default, stay safe
+    case numBusinesses < 200:
+        return 8 // Large batch: scale up
+    default:
+        return 10 // Very large batch: max workers
+    }
+}
+
+func processConcurrent(businessNames []string, workers int) []sos.BusinessInfo {
+    // Create channels
+    jobs := make(chan string, len(businessNames))
+    results := make(chan sos.BusinessInfo, len(businessNames))
+
+    // Start workers
+    for w := 1; w <= workers; w++ {
+        go worker(w, jobs, results)
+    }
+
+    // Send jobs
+    for _, name := range businessNames {
+        jobs <- name
+    }
+    close(jobs)
+
+    // Collect results
+    var businessInfos []sos.BusinessInfo
+    for i := 0; i < len(businessNames); i++ {
+        info := <-results
+        businessInfos = append(businessInfos, info)
+    }
+
+    return businessInfos
+}
+
+func worker(id int, jobs <-chan string, results chan<- sos.BusinessInfo) {
     for businessName := range jobs {
-        var info sos.BusinessInfo
-        var err error
-        for attempts := 0; attempts < 3; attempts++ {
-            log.Printf("Worker %d attempting to look up business: %s (Attempt %d)", id, businessName, attempts+1)
-            info, err = sos.LookupBusiness(businessName)
-            if err == nil && len(info.CompanyOfficials) > 0 && info.CompanyOfficials[0].Name != "No match" {
-                log.Printf("Worker %d found officials for %s on attempt %d", id, businessName, attempts+1)
-                break
-            }
-            if err != nil {
-                log.Printf("Worker %d encountered an error for %s on attempt %d: %v", id, businessName, attempts+1, err)
-            } else if len(info.CompanyOfficials) > 0 && info.CompanyOfficials[0].Name == "No match" {
-                log.Printf("Worker %d did not find officials for %s on attempt %d", id, businessName, attempts+1)
-            }
-            if attempts < 2 {
-                delay := time.Duration(2000+rand.Intn(3000)) * time.Millisecond
-                log.Printf("Worker %d will retry %s after %v", id, businessName, delay)
-                time.Sleep(delay)
-            } else {
-                log.Printf("Worker %d did not find officials for %s after %d attempts", id, businessName, attempts+1)
-            }
-        }
+        info, err := sos.LookupBusiness(businessName)
         if err != nil {
-            info = sos.BusinessInfo{BusinessName: businessName, CompanyOfficials: []sos.Official{{Title: "Result", Name: "No match"}}}
+            log.Printf("[Worker %d] Error looking up %s: %v", id, businessName, err)
+            info = sos.BusinessInfo{
+                BusinessName:     businessName,
+                CompanyOfficials: []sos.Official{{Title: "Result", Name: "Error"}},
+            }
         }
+
+        if len(info.CompanyOfficials) > 0 && info.CompanyOfficials[0].Name != "No match" && info.CompanyOfficials[0].Name != "Error" {
+            log.Printf("[Worker %d] ✓ Found %d officials for %s", id, len(info.CompanyOfficials), info.BusinessName)
+        } else {
+            log.Printf("[Worker %d] ✗ No officials found for %s", id, info.BusinessName)
+        }
+
         results <- info
     }
 }
+

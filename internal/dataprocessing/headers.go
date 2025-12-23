@@ -13,7 +13,7 @@ var HeadersConfig = struct {
         "Township", "County",
     },
     SOSResults: []string{
-        "Business Name", "Company Officials",
+        "Business Name", "Company Officials", "City",
     },
     UnifiedResults: []string{
         "ID", "PIN", "Owner", "Business Name", "Property Address", "Property City", "Property State",
