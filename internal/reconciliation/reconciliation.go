@@ -35,7 +35,7 @@ func ReconcileData(unifiedResultsPath, wpSearchPath, outputPath string) error {
 
     reconciledData := reconcileContactInfo(unifiedResults, wpResults)
 
-    fmt.Printf("Number of reconciled records: %d\n", len(reconciledData)-1) // -1 for header
+    fmt.Printf("Number of reconciled records: %d\n", len(reconciledData)-1)
 
     err = writeReconciledData(outputPath, reconciledData)
     if err != nil {
@@ -77,7 +77,6 @@ func reconcileContactInfo(unifiedResults [][]string, wpResults []ContactInfo) []
         var matchedWP ContactInfo
         var found bool
 
-        // Try matching with business name first, then owner, then official name
         if wp, ok := wpMap[normalizedBusinessName]; ok && businessName != "" {
             matchedWP = wp
             found = true
@@ -108,7 +107,7 @@ func readUnifiedResults(path string) ([][]string, error) {
     defer file.Close()
 
     reader := csv.NewReader(file)
-    reader.FieldsPerRecord = -1  // Allow variable number of fields
+    reader.FieldsPerRecord = -1
     records, err := reader.ReadAll()
     if err != nil {
         return nil, fmt.Errorf("failed to read unified results: %v", err)
@@ -129,7 +128,7 @@ func readWPResults(path string) ([]ContactInfo, error) {
     defer file.Close()
 
     reader := csv.NewReader(file)
-    reader.FieldsPerRecord = -1 // Allow variable number of fields per record
+    reader.FieldsPerRecord = -1
     rows, err := reader.ReadAll()
     if err != nil {
         return nil, fmt.Errorf("failed to read WP results: %v", err)
@@ -140,9 +139,9 @@ func readWPResults(path string) ([]ContactInfo, error) {
     }
 
     var results []ContactInfo
-    for _, row := range rows[1:] { // Skip header
+    for _, row := range rows[1:] {
         if len(row) < 3 {
-            continue // Skip rows with insufficient data
+            continue
         }
         info := ContactInfo{
             Name:   row[0],
@@ -150,13 +149,11 @@ func readWPResults(path string) ([]ContactInfo, error) {
             Emails: []string{},
         }
 
-        // Extract phone numbers and emails from all fields
         for _, field := range row {
             info.Phones = append(info.Phones, extractPhones(field)...)
             info.Emails = append(info.Emails, extractEmails(field)...)
         }
 
-        // Remove duplicates
         info.Phones = removeDuplicates(info.Phones)
         info.Emails = removeDuplicates(info.Emails)
 
@@ -178,7 +175,6 @@ func removeDuplicates(slice []string) []string {
 }
 
 func normalizeNameForMatching(name string) string {
-    // Remove common prefixes and suffixes, convert to lowercase, and remove punctuation
     name = strings.ToLower(name)
     name = strings.TrimSpace(name)
     name = strings.TrimPrefix(name, "mr ")
@@ -208,10 +204,8 @@ func writeReconciledData(path string, data [][]string) error {
     writer := csv.NewWriter(file)
     defer writer.Flush()
 
-    // Find the index of the PIN column
     pinIndex := indexOf(data[0], "PIN")
 
-    // Write header (excluding PIN)
     header := make([]string, 0, len(data[0])-1)
     for i, field := range data[0] {
         if i != pinIndex {
@@ -222,7 +216,6 @@ func writeReconciledData(path string, data [][]string) error {
         return err
     }
 
-    // Write data (excluding PIN)
     for _, row := range data[1:] {
         newRow := make([]string, 0, len(row)-1)
         for i, field := range row {
@@ -238,14 +231,13 @@ func writeReconciledData(path string, data [][]string) error {
     return nil
 }
 
-// Helper function to find index of a string in a slice
 func indexOf(slice []string, item string) int {
     for i, s := range slice {
         if s == item {
             return i
         }
     }
-    return -1  // If not found
+    return -1
 }
 
 func extractPhones(s string) []string {

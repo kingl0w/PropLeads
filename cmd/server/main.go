@@ -19,7 +19,6 @@ import (
 	"github.com/kingl0w/PropLeads/internal/sos"
 )
 
-// API Types matching frontend
 type ScrapeRequest struct {
 	County string   `json:"county"`
 	PIDs   []string `json:"pids"`
@@ -27,7 +26,7 @@ type ScrapeRequest struct {
 
 type JobStatus struct {
 	JobID    string         `json:"jobId"`
-	Status   string         `json:"status"` // pending, processing, completed, failed
+	Status   string         `json:"status"`
 	Progress int            `json:"progress"`
 	Message  string         `json:"message"`
 	Steps    []ProgressStep `json:"steps,omitempty"`
@@ -37,7 +36,7 @@ type JobStatus struct {
 type ProgressStep struct {
 	ID      string `json:"id"`
 	Label   string `json:"label"`
-	Status  string `json:"status"` // pending, processing, completed, failed
+	Status  string `json:"status"`
 	Message string `json:"message,omitempty"`
 }
 
@@ -47,7 +46,6 @@ type JobResults struct {
 	IndividualsExtracted  int `json:"individualsExtracted"`
 }
 
-// Job manager
 type JobManager struct {
 	mu   sync.RWMutex
 	jobs map[string]*JobStatus
@@ -93,7 +91,6 @@ func (jm *JobManager) UpdateJob(jobID string, updater func(*JobStatus)) {
 	}
 }
 
-// Auth Handlers
 func handleSignup(w http.ResponseWriter, r *http.Request) {
 	var req auth.SignupRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -101,7 +98,6 @@ func handleSignup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create user
 	user, err := auth.CreateUser(req.Email, req.Username, req.Password)
 	if err != nil {
 		if err == auth.ErrUserExists {
@@ -112,14 +108,12 @@ func handleSignup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate token
 	token, err := auth.GenerateToken(user)
 	if err != nil {
 		http.Error(w, "Failed to generate token", http.StatusInternalServerError)
 		return
 	}
 
-	// Return token and user
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(auth.AuthResponse{
 		Token: token,
@@ -134,7 +128,6 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Authenticate user
 	user, err := auth.AuthenticateUser(req.Email, req.Password)
 	if err != nil {
 		if err == auth.ErrInvalidCredentials {
@@ -147,14 +140,12 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate token
 	token, err := auth.GenerateToken(user)
 	if err != nil {
 		http.Error(w, "Failed to generate token", http.StatusInternalServerError)
 		return
 	}
 
-	// Return token and user
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(auth.AuthResponse{
 		Token: token,
@@ -162,7 +153,6 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Scraping Handlers (Protected)
 func handleScrapeStart(w http.ResponseWriter, r *http.Request) {
 	var req ScrapeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -170,14 +160,11 @@ func handleScrapeStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create job ID
 	jobID := uuid.New().String()
 	jobManager.CreateJob(jobID)
 
-	// Start scraping in background
 	go runScrapeJob(jobID, req.County, req.PIDs)
 
-	// Return job ID
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"jobId": jobID})
 }
@@ -196,6 +183,44 @@ func handleJobStatus(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(job)
 }
 
+func handleDownload(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	jobID := vars["jobId"]
+	filename := vars["filename"]
+
+	//prevent directory traversal
+	if filepath.Base(filename) != filename {
+		http.Error(w, "Invalid filename", http.StatusBadRequest)
+		return
+	}
+
+	var actualFilename string
+	switch filename {
+	case "parcel_results.csv":
+		actualFilename = fmt.Sprintf("parcel_results_%s.csv", jobID)
+	case "sos_results.csv":
+		actualFilename = fmt.Sprintf("sos_results_%s.csv", jobID)
+	case "unified_results.csv":
+		actualFilename = fmt.Sprintf("unified_results_%s.csv", jobID)
+	case "names.csv":
+		actualFilename = fmt.Sprintf("names_%s.csv", jobID)
+	default:
+		http.Error(w, "File not found", http.StatusNotFound)
+		return
+	}
+
+	filePath := filepath.Join("data", "output", actualFilename)
+
+	if _, err := filepath.Abs(filePath); err != nil {
+		http.Error(w, "Invalid file path", http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/csv")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
+	http.ServeFile(w, r, filePath)
+}
+
 func runScrapeJob(jobID, countyName string, pids []string) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -207,7 +232,6 @@ func runScrapeJob(jobID, countyName string, pids []string) {
 		}
 	}()
 
-	// Update status to processing
 	jobManager.UpdateJob(jobID, func(js *JobStatus) {
 		js.Status = "processing"
 		js.Progress = 5
@@ -215,7 +239,6 @@ func runScrapeJob(jobID, countyName string, pids []string) {
 		js.Steps[1].Status = "processing"
 	})
 
-	// Step 2: County property search
 	var scraper county.Scraper
 	switch countyName {
 	case "newhanover":
@@ -241,7 +264,6 @@ func runScrapeJob(jobID, countyName string, pids []string) {
 		return
 	}
 
-	// Write parcel results
 	parcelFile := filepath.Join("data", "output", fmt.Sprintf("parcel_results_%s.csv", jobID))
 	csv.WriteParcelResults(parcelFile, properties)
 
@@ -253,7 +275,6 @@ func runScrapeJob(jobID, countyName string, pids []string) {
 		js.Message = "Searching for business owners..."
 	})
 
-	// Step 3: SOS business lookup
 	parcels, _ := csv.ReadParcelResults(parcelFile)
 	uniqueBusinesses := make(map[string]bool)
 	for _, parcel := range parcels {
@@ -268,52 +289,57 @@ func runScrapeJob(jobID, countyName string, pids []string) {
 		businessNames = append(businessNames, name)
 	}
 
-	// Determine workers (auto-scale based on business count)
 	workers := 5
 	if len(businessNames) >= 100 {
 		workers = 8
 	}
 
-	// Process businesses concurrently
 	var businessInfos []sos.BusinessInfo
+	var businessMu sync.Mutex
+	processedCount := 0
 	jobs := make(chan string, len(businessNames))
-	results := make(chan sos.BusinessInfo, len(businessNames))
+	var wg sync.WaitGroup
 
-	// Start workers
 	for w := 1; w <= workers; w++ {
+		wg.Add(1)
 		go func(id int) {
+			defer wg.Done()
 			for businessName := range jobs {
 				info, err := sos.LookupBusiness(businessName)
+
 				if err != nil {
-					info = sos.BusinessInfo{
-						BusinessName:     businessName,
-						CompanyOfficials: []sos.Official{{Title: "Result", Name: "Error"}},
+					log.Printf("SOS lookup failed for '%s': %v", businessName, err)
+				} else if len(info.CompanyOfficials) > 0 {
+					firstOfficial := info.CompanyOfficials[0]
+					if firstOfficial.Title != "Result" && firstOfficial.Title != "Error" {
+						businessMu.Lock()
+						businessInfos = append(businessInfos, info)
+						businessMu.Unlock()
+					} else {
+						log.Printf("SOS lookup returned no match for '%s': %s", businessName, firstOfficial.Name)
 					}
 				}
 
-				// Update progress
-				completed := len(businessInfos) + 1
+				businessMu.Lock()
+				processedCount++
+				completed := processedCount
+				businessMu.Unlock()
+
 				progress := 30 + int(float64(completed)/float64(len(businessNames))*40)
 				jobManager.UpdateJob(jobID, func(js *JobStatus) {
 					js.Progress = progress
 					js.Steps[2].Message = fmt.Sprintf("%d/%d businesses processed", completed, len(businessNames))
 				})
-
-				results <- info
 			}
 		}(w)
 	}
 
-	// Send jobs
 	for _, name := range businessNames {
 		jobs <- name
 	}
 	close(jobs)
 
-	// Collect results
-	for i := 0; i < len(businessNames); i++ {
-		businessInfos = append(businessInfos, <-results)
-	}
+	wg.Wait()
 
 	sosFile := filepath.Join("data", "output", fmt.Sprintf("sos_results_%s.csv", jobID))
 	csv.WriteSOSResults(sosFile, businessInfos)
@@ -326,7 +352,6 @@ func runScrapeJob(jobID, countyName string, pids []string) {
 		js.Message = "Processing and merging data..."
 	})
 
-	// Step 4: Data processing
 	unifiedFile := filepath.Join("data", "output", fmt.Sprintf("unified_results_%s.csv", jobID))
 	namesFile := filepath.Join("data", "output", fmt.Sprintf("names_%s.csv", jobID))
 
@@ -342,10 +367,8 @@ func runScrapeJob(jobID, countyName string, pids []string) {
 		js.Message = "Finalizing exports..."
 	})
 
-	// Step 5: Complete
-	time.Sleep(1 * time.Second) // Small delay for UX
+	time.Sleep(1 * time.Second)
 
-	// Count individuals from unified results
 	individualsCount := 0
 	if unifiedData, err := csv.ReadParcelResults(unifiedFile); err == nil {
 		individualsCount = len(unifiedData)
@@ -368,7 +391,7 @@ func enableCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
@@ -380,7 +403,6 @@ func enableCORS(next http.Handler) http.Handler {
 }
 
 func main() {
-	// Initialize database
 	if err := database.InitDB(); err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
@@ -388,15 +410,13 @@ func main() {
 
 	router := mux.NewRouter()
 
-	// Public routes (no auth required)
 	router.HandleFunc("/api/auth/signup", handleSignup).Methods("POST", "OPTIONS")
 	router.HandleFunc("/api/auth/login", handleLogin).Methods("POST", "OPTIONS")
 
-	// Protected routes (auth required)
 	router.HandleFunc("/api/scrape", auth.AuthMiddleware(handleScrapeStart)).Methods("POST", "OPTIONS")
 	router.HandleFunc("/api/scrape/{jobId}/status", auth.AuthMiddleware(handleJobStatus)).Methods("GET", "OPTIONS")
+	router.HandleFunc("/api/scrape/{jobId}/download/{filename}", auth.AuthMiddleware(handleDownload)).Methods("GET", "OPTIONS")
 
-	// Wrap with CORS middleware
 	handler := enableCORS(router)
 
 	port := "8080"

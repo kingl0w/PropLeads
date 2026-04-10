@@ -9,7 +9,6 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      # Persist database and results
       - ./data:/app/data
     environment:
       - JWT_SECRET=${JWT_SECRET:-change-this-in-production-super-secret-key-2024}

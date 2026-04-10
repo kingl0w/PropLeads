@@ -19,7 +19,6 @@ func InitDB() error {
 		return err
 	}
 
-	// Create users table
 	createTableSQL := `
 	CREATE TABLE IF NOT EXISTS users (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,

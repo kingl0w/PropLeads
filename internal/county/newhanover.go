@@ -12,18 +12,16 @@ import (
 
 type NewHanoverScraper struct{}
 
-// NewNewHanoverScraper creates a new scraper instance
 func NewNewHanoverScraper() *NewHanoverScraper {
 	return &NewHanoverScraper{}
 }
 
-// Scrape method to scrape multiple PIDs using the ArcGIS REST API
 func (nhs *NewHanoverScraper) Scrape(pids []string) ([]Property, error) {
 	var properties []Property
 
 	for _, pid := range pids {
 		log.Printf("Fetching data for PID %s from ArcGIS REST API", pid)
-		// Create a new collector for each PID to avoid callback conflicts
+		//new collector per pid to avoid callback conflicts
 		c := colly.NewCollector()
 		info, err := nhs.getParcelInfo(c, pid)
 		if err != nil {
@@ -37,9 +35,7 @@ func (nhs *NewHanoverScraper) Scrape(pids []string) ([]Property, error) {
 	return properties, nil
 }
 
-// getParcelInfo retrieves parcel information from the New Hanover County ArcGIS REST API
 func (nhs *NewHanoverScraper) getParcelInfo(c *colly.Collector, pid string) (Property, error) {
-	// New Hanover County PropertyOwners FeatureServer endpoint
 	baseURL := "https://gisport.nhcgov.com/server/rest/services/Layers/PropertyOwners/FeatureServer/0/query"
 	pid = strings.TrimSpace(pid)
 
@@ -47,7 +43,6 @@ func (nhs *NewHanoverScraper) getParcelInfo(c *colly.Collector, pid string) (Pro
 	var err error
 
 	c.OnResponse(func(r *colly.Response) {
-		// First unmarshal into a flexible structure
 		var rawResponse map[string]interface{}
 		if unmarshalErr := json.Unmarshal(r.Body, &rawResponse); unmarshalErr != nil {
 			err = fmt.Errorf("error parsing JSON for PID %s: %v", pid, unmarshalErr)
@@ -64,7 +59,6 @@ func (nhs *NewHanoverScraper) getParcelInfo(c *colly.Collector, pid string) (Pro
 		feature := features[0].(map[string]interface{})
 		attrs := feature["attributes"].(map[string]interface{})
 
-		// Helper function to safely get string values
 		getString := func(key string) string {
 			if val, ok := attrs[key]; ok && val != nil {
 				return fmt.Sprintf("%v", val)
@@ -72,7 +66,6 @@ func (nhs *NewHanoverScraper) getParcelInfo(c *colly.Collector, pid string) (Pro
 			return ""
 		}
 
-		// Helper function to safely get float values
 		getFloat := func(key string) float64 {
 			if val, ok := attrs[key]; ok && val != nil {
 				switch v := val.(type) {
@@ -88,7 +81,6 @@ func (nhs *NewHanoverScraper) getParcelInfo(c *colly.Collector, pid string) (Pro
 			return 0
 		}
 
-		// Helper function to safely get int values
 		getInt := func(key string) int {
 			if val, ok := attrs[key]; ok && val != nil {
 				switch v := val.(type) {
@@ -104,7 +96,6 @@ func (nhs *NewHanoverScraper) getParcelInfo(c *colly.Collector, pid string) (Pro
 			return 0
 		}
 
-		// Build property address from components
 		propertyAddress := ""
 		adrno := getInt("ADRNO")
 		if adrno > 0 {
@@ -127,7 +118,6 @@ func (nhs *NewHanoverScraper) getParcelInfo(c *colly.Collector, pid string) (Pro
 		}
 		propertyAddress = strings.TrimSpace(propertyAddress)
 
-		// Build owner address from components
 		ownerAddr1 := strings.TrimSpace(getString("OWNER_ADDR1"))
 		ownerAddr2 := strings.TrimSpace(getString("OWNER_ADDR2"))
 		ownerAddress := ownerAddr1
@@ -149,15 +139,15 @@ func (nhs *NewHanoverScraper) getParcelInfo(c *colly.Collector, pid string) (Pro
 			OWNER_STATE:      strings.TrimSpace(getString("OWNER_STATE")),
 			OWNER_ZIP:        strings.TrimSpace(getString("OWNER_ZIP")),
 			ACRES:            getFloat("ACRES"),
-			CALCACRES:        0, // Not available in this API
+			CALCACRES:        0,
 			SQFT:             getFloat("SFLA"),
 			ZONE:             strings.TrimSpace(getString("ZONING")),
-			TAX_CODES:        "", // Not directly available
-			YEAR_BUILT:       "", // Not available in PropertyOwners layer
+			TAX_CODES:        "",
+			YEAR_BUILT:       "",
 			APPRAISED:        getFloat("APRTOT"),
 			SALE_DATE:        strings.TrimSpace(getString("SALE_DATE")),
 			SALE_PRICE:       getFloat("SALE_PRICE"),
-			TOWNSHIP:         "", // Not available
+			TOWNSHIP:         "",
 			COUNTY:           "New Hanover",
 		}
 
@@ -170,7 +160,6 @@ func (nhs *NewHanoverScraper) getParcelInfo(c *colly.Collector, pid string) (Pro
 		err = fmt.Errorf("request failed for PID %s: %v", pid, e)
 	})
 
-	// Query by PID field - the API uses PARID field
 	url := fmt.Sprintf("%s?f=json&where=PARID='%s'&returnGeometry=false&outFields=*", baseURL, pid)
 	log.Printf("Querying: %s", url)
 
@@ -182,7 +171,6 @@ func (nhs *NewHanoverScraper) getParcelInfo(c *colly.Collector, pid string) (Pro
 	return parcelInfo, err
 }
 
-// NewHanoverResponse represents the API response structure
 type NewHanoverResponse struct {
 	Features []struct {
 		Attributes struct {

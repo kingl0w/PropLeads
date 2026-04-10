@@ -20,12 +20,10 @@ func WriteParcelResults(filename string, parcels []county.Property) error {
     writer := csv.NewWriter(file)
     defer writer.Flush()
 
-    // Write header
     if err := writer.Write(dataprocessing.HeadersConfig.ParcelResults); err != nil {
         return err
     }
 
-    // Write data
     for _, parcel := range parcels {
         row := []string{
             parcel.ALPHA,
@@ -89,7 +87,7 @@ func WriteSOSResults(filename string, businesses []sos.BusinessInfo) error {
         } else {
             for _, official := range business.CompanyOfficials {
                 officialInfo := strings.TrimSpace(official.Title + ": " + official.Name)
-                officialInfo = strings.Join(strings.Fields(officialInfo), " ") // Remove extra spaces
+                officialInfo = strings.Join(strings.Fields(officialInfo), " ")
                 row := []string{
                     business.BusinessName,
                     officialInfo,

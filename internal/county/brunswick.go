@@ -12,18 +12,16 @@ import (
 
 type BrunswickScraper struct{}
 
-// NewBrunswickScraper creates a new scraper instance
 func NewBrunswickScraper() *BrunswickScraper {
 	return &BrunswickScraper{}
 }
 
-// Scrape method to scrape multiple PIDs using the ArcGIS REST API
 func (bs *BrunswickScraper) Scrape(pids []string) ([]Property, error) {
 	var properties []Property
 
 	for _, pid := range pids {
 		log.Printf("Fetching data for PID %s from ArcGIS REST API", pid)
-		// Create a new collector for each PID to avoid callback conflicts
+		//new collector per pid to avoid callback conflicts
 		c := colly.NewCollector()
 		info, err := bs.getParcelInfo(c, pid)
 		if err != nil {
@@ -37,9 +35,7 @@ func (bs *BrunswickScraper) Scrape(pids []string) ([]Property, error) {
 	return properties, nil
 }
 
-// getParcelInfo retrieves parcel information from the Brunswick County ArcGIS REST API
 func (bs *BrunswickScraper) getParcelInfo(c *colly.Collector, pid string) (Property, error) {
-	// Brunswick County Parcels MapServer endpoint
 	baseURL := "https://bcgis.brunswickcountync.gov/arcgis/rest/services/Mapping/DataViewerLive/MapServer/26/query"
 	pid = strings.TrimSpace(pid)
 
@@ -57,7 +53,6 @@ func (bs *BrunswickScraper) getParcelInfo(c *colly.Collector, pid string) (Prope
 		if len(response.Features) > 0 {
 			attrs := response.Features[0].Attributes
 
-			// Build property address from components
 			propertyAddress := strings.TrimSpace(attrs.HouseNumber)
 			if attrs.StreetName != "" {
 				propertyAddress += " " + strings.TrimSpace(attrs.StreetName)
@@ -69,19 +64,16 @@ func (bs *BrunswickScraper) getParcelInfo(c *colly.Collector, pid string) (Prope
 				propertyAddress += " " + strings.TrimSpace(attrs.StreetDirection)
 			}
 
-			// Parse year built
 			yearBuilt := ""
 			if attrs.ActualYearBuilt > 0 {
 				yearBuilt = strconv.Itoa(attrs.ActualYearBuilt)
 			}
 
-			// Parse acreage from string
 			acres := 0.0
 			if attrs.DeedAcreage != "" {
 				acres, _ = strconv.ParseFloat(strings.TrimSpace(attrs.DeedAcreage), 64)
 			}
 
-			// Build owner address
 			ownerAddress := strings.TrimSpace(attrs.Address1)
 			if attrs.Address2 != "" && ownerAddress != "" {
 				ownerAddress += ", " + strings.TrimSpace(attrs.Address2)
@@ -94,7 +86,7 @@ func (bs *BrunswickScraper) getParcelInfo(c *colly.Collector, pid string) (Prope
 				PIN:              strings.TrimSpace(attrs.PIN),
 				NAME:             strings.TrimSpace(attrs.Name1),
 				PROPERTY_ADDRESS: propertyAddress,
-				PROPERTY_CITY:    "", // Not available in API
+				PROPERTY_CITY:    "",
 				PROPERTY_STATE:   "NC",
 				OWNER_ADDRESS:    ownerAddress,
 				OWNER_CITY:       strings.TrimSpace(attrs.City),
@@ -104,12 +96,12 @@ func (bs *BrunswickScraper) getParcelInfo(c *colly.Collector, pid string) (Prope
 				CALCACRES:        attrs.CALCAC,
 				SQFT:             attrs.TotalActualAreaHeated,
 				ZONE:             strings.TrimSpace(attrs.Zoning),
-				TAX_CODES:        "", // Not directly available
+				TAX_CODES:        "",
 				YEAR_BUILT:       yearBuilt,
-				APPRAISED:        0, // Not available in Parcels layer
+				APPRAISED:        0,
 				SALE_DATE:        strings.TrimSpace(attrs.DeedDate),
-				SALE_PRICE:       0, // Not available in Parcels layer
-				TOWNSHIP:         "", // Not available
+				SALE_PRICE:       0,
+				TOWNSHIP:         "",
 				COUNTY:           "Brunswick",
 			}
 
@@ -124,7 +116,6 @@ func (bs *BrunswickScraper) getParcelInfo(c *colly.Collector, pid string) (Prope
 		err = fmt.Errorf("request failed for PID %s: %v", pid, e)
 	})
 
-	// Query by ParcelNumber field
 	url := fmt.Sprintf("%s?f=json&where=ParcelNumber='%s'&returnGeometry=false&outFields=*", baseURL, pid)
 	log.Printf("Querying: %s", url)
 
@@ -136,7 +127,6 @@ func (bs *BrunswickScraper) getParcelInfo(c *colly.Collector, pid string) (Prope
 	return parcelInfo, err
 }
 
-// BrunswickResponse represents the API response structure
 type BrunswickResponse struct {
 	Features []struct {
 		Attributes struct {
@@ -158,7 +148,7 @@ type BrunswickResponse struct {
 			StreetDirection        string  `json:"StreetDirection"`
 			Zoning                 string  `json:"Zoning"`
 			ActualYearBuilt        int     `json:"ActualYearBuilt"`
-			TotalActualAreaHeated  float64 `json:"TotalAcutalAreaHeated"` // Note: API has typo "Acutal"
+			TotalActualAreaHeated  float64 `json:"TotalAcutalAreaHeated"` //api has typo "Acutal" - do not fix
 			HeatedAreaCard         float64 `json:"HeatedAreaCard"`
 			DeedDate               string  `json:"DeedDate"`
 			DeedBook               string  `json:"DeedBook"`

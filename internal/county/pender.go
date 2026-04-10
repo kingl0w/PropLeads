@@ -44,20 +44,20 @@ func getParcelInfo(c *colly.Collector, parcelID string) (Property, error) {
                 PIN:              attrs.PIN,
                 NAME:             attrs.NAME,
                 PROPERTY_ADDRESS: attrs.PROPERTY_ADDRESS,
-                PROPERTY_CITY:    "", // Leave property city blank for Pender County
-                PROPERTY_STATE:   "NC", // Always set to NC for Pender County
+                PROPERTY_CITY:    "",
+                PROPERTY_STATE:   "NC",
                 OWNER_ADDRESS:    attrs.ADDR,
-                OWNER_CITY:       attrs.CITY, // Use the CITY field from the API response
+                OWNER_CITY:       attrs.CITY,
                 OWNER_STATE:      attrs.STATE,
                 OWNER_ZIP:        attrs.ZIP,
                 ACRES:            attrs.ACRES,
                 CALCACRES:        attrs.CALCACRES,
-                SQFT:             0, // Set to 0 if not available
+                SQFT:             0,
                 ZONE:             attrs.ZONE,
                 TAX_CODES:        attrs.TAX_CODES,
-                YEAR_BUILT:       "", // Set to empty string if not available
-                APPRAISED:        0, // Set to 0 if not available
-                SALE_DATE:        "", // Set to empty string if not available
+                YEAR_BUILT:       "",
+                APPRAISED:        0,
+                SALE_DATE:        "",
                 SALE_PRICE:       attrs.SALE_PRICE,
                 TOWNSHIP:         attrs.TNSH_DESC,
                 COUNTY:           "Pender",

@@ -45,7 +45,7 @@ func runReconciliation() {
     if len(wpFiles) == 0 {
         log.Fatalf("No WP search results file found matching pattern: %s", wpSearchPattern)
     }
-    wpSearchPath := wpFiles[0] // Use the first matching file
+    wpSearchPath := wpFiles[0]
 
     err = reconciliation.ReconcileData(unifiedResultsPath, wpSearchPath, outputPath)
     if err != nil {
@@ -96,7 +96,6 @@ func runCountyScrape(countyName string, workers int) {
         log.Fatalf("Failed to scrape: %v", err)
     }
 
-    // Print to console
     for _, info := range properties {
         fmt.Printf("Parcel Information:\n")
         fmt.Printf("  ID: %s\n", info.ALPHA)
@@ -116,7 +115,6 @@ func runCountyScrape(countyName string, workers int) {
         fmt.Println()
     }
 
-    // Write results to CSV
     outputFilename := "data/output/parcel_results.csv"
     err = csv.WriteParcelResults(outputFilename, properties)
     if err != nil {
@@ -125,7 +123,6 @@ func runCountyScrape(countyName string, workers int) {
         fmt.Printf("Results written to %s\n", outputFilename)
     }
 
-    // Run SOS scrape after county scrape
     runSOSScrape(workers)
 }
 
@@ -135,13 +132,11 @@ func runSOSScrape(workers int) {
     parcelResultsFile := filepath.Join("data", "output", "parcel_results.csv")
     sosResultsFile := filepath.Join("data", "output", "sos_results.csv")
 
-    // Read parcel results
     parcels, err := csv.ReadParcelResults(parcelResultsFile)
     if err != nil {
         log.Fatalf("Failed to read parcel results: %v", err)
     }
 
-    // Extract unique business names
     uniqueBusinesses := make(map[string]bool)
     for _, parcel := range parcels {
         ownerName, ok := parcel["Owner"]
@@ -156,20 +151,16 @@ func runSOSScrape(workers int) {
 
     fmt.Printf("Found %d unique businesses to look up\n", len(uniqueBusinesses))
 
-    // Convert map to slice for easier processing
     businessNames := make([]string, 0, len(uniqueBusinesses))
     for name := range uniqueBusinesses {
         businessNames = append(businessNames, name)
     }
 
-    // Determine worker count (auto-scale if workers == 0)
     numWorkers := determineWorkers(workers, len(businessNames))
     fmt.Printf("Using %d concurrent workers\n", numWorkers)
 
-    // Process businesses concurrently
     businessInfos := processConcurrent(businessNames, numWorkers)
 
-    // Write results
     err = csv.WriteSOSResults(sosResultsFile, businessInfos)
     if err != nil {
         log.Fatalf("Failed to write SOS results: %v", err)
@@ -178,43 +169,37 @@ func runSOSScrape(workers int) {
 }
 
 func determineWorkers(userWorkers int, numBusinesses int) int {
-    // If user specified workers, use that
     if userWorkers > 0 {
         return userWorkers
     }
 
-    // Auto-scale based on number of businesses
     switch {
     case numBusinesses < 10:
-        return 3 // Small batch: conservative
+        return 3
     case numBusinesses < 50:
-        return 5 // Medium batch: default
+        return 5
     case numBusinesses < 100:
-        return 5 // Still default, stay safe
+        return 5
     case numBusinesses < 200:
-        return 8 // Large batch: scale up
+        return 8
     default:
-        return 10 // Very large batch: max workers
+        return 10
     }
 }
 
 func processConcurrent(businessNames []string, workers int) []sos.BusinessInfo {
-    // Create channels
     jobs := make(chan string, len(businessNames))
     results := make(chan sos.BusinessInfo, len(businessNames))
 
-    // Start workers
     for w := 1; w <= workers; w++ {
         go worker(w, jobs, results)
     }
 
-    // Send jobs
     for _, name := range businessNames {
         jobs <- name
     }
     close(jobs)
 
-    // Collect results
     var businessInfos []sos.BusinessInfo
     for i := 0; i < len(businessNames); i++ {
         info := <-results

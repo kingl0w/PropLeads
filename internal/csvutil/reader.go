@@ -39,7 +39,7 @@ func ReadParcelResults(filename string) ([]map[string]string, error) {
 	defer file.Close()
 
 	reader := csv.NewReader(file)
-	reader.FieldsPerRecord = -1 // Allow variable number of fields per record
+	reader.FieldsPerRecord = -1
 
 	records, err := reader.ReadAll()
 	if err != nil {
@@ -73,7 +73,7 @@ func ReadParcelResults(filename string) ([]map[string]string, error) {
         for j, value := range record {
             key := actualHeaders[j]
             value = strings.TrimSpace(value)
-            value = strings.Trim(value, "\"") // Remove surrounding quotes
+            value = strings.Trim(value, "\"")
             result[key] = value
         }
         results = append(results, result)
