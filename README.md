@@ -202,13 +202,13 @@ John Smith,555-1234,john@example.com,...
 - **Method:** Official ArcGIS REST APIs
 - **Speed:** 1-3 seconds per PID
 - **Reliability:** 99.9%+ (government APIs)
-- **Chrome Needed:** NO ✅
+- **Chrome Needed:** NO 
 
 ### SOS Scraper (Business Officials)
 - **Method:** Browser automation (ChromeDP)
 - **Speed:** 5-10 seconds per business
 - **Reliability:** 90%+ (robust error handling)
-- **Chrome Needed:** YES ⚠️
+- **Chrome Needed:** YES 
 
 ### Data Processing
 - **Method:** Go CSV processing
